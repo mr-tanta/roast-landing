@@ -1,0 +1,50 @@
+# Environment Variables Template for Amplify Console
+# Add these to: https://console.aws.amazon.com/amplify/home?region=us-east-1#/d29z8nh5m7c4h1/settings/environment
+
+# Production Configuration
+NODE_ENV=production
+NEXT_PUBLIC_USE_EXTERNAL_API=true
+NEXT_PUBLIC_API_URL=https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod
+NEXT_PUBLIC_APP_URL=https://roastmylanding.com
+
+# Supabase Configuration (get from your .env.local)
+NEXT_PUBLIC_SUPABASE_URL=[your_supabase_url]
+NEXT_PUBLIC_SUPABASE_ANON_KEY=[your_supabase_anon_key]
+SUPABASE_SERVICE_ROLE_KEY=[your_supabase_service_key]
+
+# Stripe Configuration (get from your .env.local)
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=[your_stripe_publishable_key]
+STRIPE_SECRET_KEY=[your_stripe_secret_key]
+STRIPE_WEBHOOK_SECRET=[your_stripe_webhook_secret]
+
+# AI Provider Keys (get from your .env.local)
+OPENAI_API_KEY=[your_openai_key]
+ANTHROPIC_API_KEY=[your_anthropic_key]
+GEMINI_API_KEY=[your_gemini_key]
+
+# Redis Configuration (get from your .env.local)
+REDIS_HOST=[your_redis_host]
+REDIS_PORT=6379
+REDIS_PASSWORD=[your_redis_password]
+REDIS_DB=4
+REDIS_URL=[your_redis_url]
+
+# AWS S3 & CloudFront (get from your .env.local)
+S3_BUCKET=[your_s3_bucket]
+CLOUDFRONT_DOMAIN=[your_cloudfront_domain]
+CLOUDFRONT_DISTRIBUTION_ID=[your_cloudfront_id]
+
+# Google OAuth (get from your .env.local)
+GOOGLE_OAUTH_CLIENT_ID=[your_google_client_id]
+GOOGLE_OAUTH_CLIENT_SECRET=[your_google_client_secret]
+
+# Additional Configuration
+CACHE_BACKEND=redis
+FREE_TIER_DAILY_LIMIT=3
+PRO_TIER_DAILY_LIMIT=1000
+
+# INSTRUCTIONS:
+# 1. Copy values from your local .env.local file
+# 2. Go to: https://console.aws.amazon.com/amplify/home?region=us-east-1#/d29z8nh5m7c4h1/settings/environment
+# 3. Click "Add environment variable" for each variable above
+# 4. After adding all variables, redeploy the app

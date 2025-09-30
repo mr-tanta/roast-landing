@@ -1,6 +1,6 @@
 #!/bin/bash
 
-APP_ID="d2fkxpg9vn5h9c"
+APP_ID="d29z8nh5m7c4h1"
 REGION="us-east-1"
 
 echo "Setting up environment variables for Amplify App: $APP_ID"

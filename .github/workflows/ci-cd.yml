@@ -494,7 +494,7 @@ jobs:
         run: |
           echo "Triggering Amplify deployment for RoastMyLanding..."
           aws amplify start-job \
-            --app-id d2fkxpg9vn5h9c \
+            --app-id d29z8nh5m7c4h1 \
             --branch-name main \
             --job-type RELEASE \
             --region us-east-1
@@ -506,7 +506,7 @@ jobs:
           echo "Running production smoke tests..."
           sleep 30  # Wait for Amplify deployment to be ready
           
-          AMPLIFY_URL="https://d2fkxpg9vn5h9c.amplifyapp.com"
+          AMPLIFY_URL="https://d29z8nh5m7c4h1.amplifyapp.com"
           
           # Health check test
           HEALTH_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$AMPLIFY_URL/health" || echo "000")
@@ -531,7 +531,7 @@ jobs:
       - name: Post-deployment metrics
         run: |
           echo "Collecting post-deployment metrics..."
-          AMPLIFY_URL="https://d2fkxpg9vn5h9c.amplifyapp.com"
+          AMPLIFY_URL="https://d29z8nh5m7c4h1.amplifyapp.com"
           
           # Response time test
           START_TIME=$(date +%s%3N)
@@ -582,7 +582,7 @@ jobs:
                     },
                     {
                       "title": "Live URL",
-                      "value": "https://d2fkxpg9vn5h9c.amplifyapp.com",
+                      "value": "https://d29z8nh5m7c4h1.amplifyapp.com",
                       "short": false
                     }
                   ]

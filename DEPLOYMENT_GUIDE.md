@@ -3,8 +3,8 @@
 ## AWS Amplify Setup ✅ COMPLETED
 
 Your AWS Amplify app has been created and configured:
-- **App ID**: `d2fkxpg9vn5h9c`
-- **Default Domain**: `d2fkxpg9vn5h9c.amplifyapp.com`
+- **App ID**: `d29z8nh5m7c4h1`
+- **Default Domain**: `d29z8nh5m7c4h1.amplifyapp.com`
 - **Build Configuration**: Next.js with pnpm (8GB compute)
 - **Basic Environment Variables**: Set
 
@@ -14,7 +14,7 @@ Your AWS Amplify app has been created and configured:
 
 Visit the AWS Amplify Console:
 ```
-https://console.aws.amazon.com/amplify/home?region=us-east-1#/d2fkxpg9vn5h9c
+https://console.aws.amazon.com/amplify/home?region=us-east-1#/d29z8nh5m7c4h1
 ```
 
 1. Click **"Connect repository"**
@@ -75,7 +75,7 @@ Update your GitHub Actions workflow to trigger Amplify deployments:
     steps:
       - name: Trigger Amplify Deployment
         run: |
-          aws amplify start-job --app-id d2fkxpg9vn5h9c --branch-name main --job-type RELEASE
+          aws amplify start-job --app-id d29z8nh5m7c4h1 --branch-name main --job-type RELEASE
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -94,7 +94,7 @@ The `amplify.yml` file is configured for:
 
 Once deployed, verify:
 
-1. **Health Check**: Visit `https://d2fkxpg9vn5h9c.amplifyapp.com/health`
+1. **Health Check**: Visit `https://d29z8nh5m7c4h1.amplifyapp.com/health`
 2. **API Integration**: Test the roast functionality
 3. **Authentication**: Test Supabase login/signup
 4. **Payments**: Test Stripe checkout flow
