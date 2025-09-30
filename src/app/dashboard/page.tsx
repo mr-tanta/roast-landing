@@ -1,4 +1,5 @@
 import { UserDashboard } from '@/components/dashboard/user-dashboard'
+import { Header } from '@/components/layout/header'
 import { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -8,8 +9,11 @@ export const metadata: Metadata = {
 
 export default function DashboardPage() {
   return (
-    <div className="container mx-auto py-8 px-4">
-      <UserDashboard />
+    <div className="min-h-screen bg-background">
+      <Header />
+      <div className="container mx-auto py-8 px-4">
+        <UserDashboard />
+      </div>
     </div>
   )
 }

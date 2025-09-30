@@ -5,6 +5,7 @@ import { Flame, Zap, Target, TrendingUp } from 'lucide-react'
 import { RoastForm } from '@/components/roast-form'
 import { RoastDisplay } from '@/components/roast-display'
 import { APIStatus } from '@/components/api-status'
+import { Header } from '@/components/layout/header'
 import type { RoastResult } from '@/types'
 
 export default function Home() {
@@ -12,28 +13,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
-      {/* Header */}
-      <header className="border-b border-gray-200 bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Flame className="w-8 h-8 text-orange-600" />
-            <span className="text-2xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
-              RoastMyLanding
-            </span>
-          </div>
-          <nav className="hidden md:flex items-center gap-6">
-            <a href="#how-it-works" className="text-gray-600 hover:text-gray-900">
-              How it works
-            </a>
-            <a href="#pricing" className="text-gray-600 hover:text-gray-900">
-              Pricing
-            </a>
-            <button className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">
-              Sign In
-            </button>
-          </nav>
-        </div>
-      </header>
+      <Header />
 
       <main className="container mx-auto px-4 py-16">
         {!roastResult ? (
