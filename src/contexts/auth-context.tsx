@@ -16,7 +16,7 @@ interface AuthContextType {
   signInWithOAuth: (provider: 'google' | 'github') => Promise<{ error: AuthError | null }>
   signOut: () => Promise<{ error: AuthError | null }>
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>
-  updateProfile: (data: { name?: string; company?: string; website?: string }) => Promise<{ error: any }>
+  updateProfile: (data: { name?: string; company?: string; website?: string }) => Promise<{ error: Error | null }>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -103,12 +103,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error }
   }
 
-  const signUp = async (email: string, password: string, options = {}) => {
+  const signUp = async (email: string, password: string, options?: {
+    data?: { name?: string; company?: string; website?: string }
+  }) => {
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: options.data,
+        data: options?.data,
       },
     })
     return { error }
@@ -150,7 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       .eq('id', user.id)
 
-    return { error }
+    return { error: error ? new Error(error.message) : null }
   }
 
   const value: AuthContextType = {

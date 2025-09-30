@@ -246,7 +246,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'signin' }: AuthModalP
                   type="button"
                   variant="link"
                   className="w-full"
-                  onClick={() => handleResetPassword}
+                  onClick={handleResetPassword}
                 >
                   Forgot your password?
                 </Button>

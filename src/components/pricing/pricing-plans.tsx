@@ -49,8 +49,8 @@ export function PricingPlans() {
 
       // Redirect to Stripe Checkout
       window.location.href = data.url
-    } catch (error: any) {
-      toast.error(error.message || 'Something went wrong')
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Something went wrong')
       setLoadingPlan(null)
     }
   }
@@ -76,19 +76,18 @@ export function PricingPlans() {
     },
     {
       key: 'trial' as const,
-      name: '3-Day Trial',
-      price: '$1',
-      period: 'for 3 days',
-      description: 'Test all premium features risk-free',
+      name: 'Free Trial',
+      price: '$4.99',
+      period: 'one-time',
+      description: 'Get started with 5 premium roasts',
       icon: <Zap className="h-5 w-5 text-blue-500" />,
       badge: 'POPULAR',
       features: [
-        'Unlimited roasts for 3 days',
-        'Full AI analysis with GPT-4 & Claude',
-        'Desktop & mobile screenshots',
+        '5 premium roasts',
+        'Full AI analysis',
+        'Screenshots included',
         'No watermarks',
         'Priority processing',
-        'Download reports',
       ],
       buttonText: 'Start Trial',
       buttonVariant: 'default' as const,
@@ -96,20 +95,18 @@ export function PricingPlans() {
     {
       key: 'monthly' as const,
       name: 'Pro Monthly',
-      price: '$19',
+      price: '$29',
       period: 'per month',
-      description: 'For regular landing page optimization',
+      description: 'Unlimited roasts every month',
       icon: <Crown className="h-5 w-5 text-yellow-500" />,
       badge: null,
       features: [
         'Unlimited roasts',
-        'Full AI analysis with GPT-4 & Claude',
+        'Full AI analysis',
         'High-quality screenshots',
-        'Export to PDF/PNG',
+        'Export features',
         'Priority support',
         'No watermarks',
-        'Advanced analytics',
-        'A/B test suggestions',
       ],
       buttonText: 'Get Pro',
       buttonVariant: 'default' as const,
@@ -117,18 +114,19 @@ export function PricingPlans() {
     {
       key: 'annual' as const,
       name: 'Pro Annual',
-      price: '$190',
+      price: '$290',
       period: 'per year',
-      description: 'Best value - save 17%',
+      description: 'Best value - 17% savings!',
       icon: <Crown className="h-5 w-5 text-yellow-500" />,
       badge: 'BEST VALUE',
       features: [
-        'Everything in Pro Monthly',
-        '17% discount ($228 → $190)',
-        'Priority feature requests',
-        'Dedicated support channel',
-        'Early access to new features',
-        'Custom integrations (coming soon)',
+        'Unlimited roasts',
+        'Full AI analysis', 
+        'High-quality screenshots',
+        'Export features',
+        'Priority support',
+        'No watermarks',
+        '17% annual discount',
       ],
       buttonText: 'Get Annual Pro',
       buttonVariant: 'default' as const,
@@ -220,7 +218,7 @@ export function PricingPlans() {
               <div>
                 <h3 className="font-semibold mb-2">Can I cancel anytime?</h3>
                 <p className="text-muted-foreground">
-                  Yes, you can cancel your subscription at any time. You'll continue to have access 
+                  Yes, you can cancel your subscription at any time. You&apos;ll continue to have access
                   to Pro features until the end of your billing period.
                 </p>
               </div>
@@ -228,7 +226,7 @@ export function PricingPlans() {
               <div>
                 <h3 className="font-semibold mb-2">What happens after the trial?</h3>
                 <p className="text-muted-foreground">
-                  After your 3-day trial ends, you'll be charged $1. You can cancel before the trial 
+                  After your 3-day trial ends, you&apos;ll be charged $1. You can cancel before the trial
                   ends to avoid any charges.
                 </p>
               </div>
@@ -236,7 +234,7 @@ export function PricingPlans() {
               <div>
                 <h3 className="font-semibold mb-2">Do you offer refunds?</h3>
                 <p className="text-muted-foreground">
-                  Yes, we offer a 30-day money-back guarantee on all paid plans. If you're not 
+                  Yes, we offer a 30-day money-back guarantee on all paid plans. If you&apos;re not
                   satisfied, contact us for a full refund.
                 </p>
               </div>

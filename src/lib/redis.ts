@@ -6,17 +6,18 @@ if (!process.env.REDIS_URL && (!process.env.REDIS_HOST || !process.env.REDIS_POR
 }
 
 // Create Redis connection
-export const redis = new Redis(process.env.REDIS_URL || {
-  host: process.env.REDIS_HOST,
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  password: process.env.REDIS_PASSWORD,
-  db: parseInt(process.env.REDIS_DB || '0'),
-  retryDelayOnFailover: 100,
-  maxRetriesPerRequest: 3,
-  lazyConnect: true,
-  keepAlive: 30000,
-  connectionName: 'roastmylanding-frontend',
-})
+export const redis = process.env.REDIS_URL
+  ? new Redis(process.env.REDIS_URL)
+  : new Redis({
+      host: process.env.REDIS_HOST,
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD,
+      db: parseInt(process.env.REDIS_DB || '0'),
+      maxRetriesPerRequest: 3,
+      lazyConnect: true,
+      keepAlive: 30000,
+      connectionName: 'roastmylanding-frontend',
+    })
 
 // Redis connection event handlers
 redis.on('connect', () => {
@@ -31,7 +32,7 @@ redis.on('close', () => {
   console.log('Redis connection closed')
 })
 
-redis.on('reconnecting', (time) => {
+redis.on('reconnecting', (time: number) => {
   console.log(`Redis reconnecting in ${time}ms`)
 })
 

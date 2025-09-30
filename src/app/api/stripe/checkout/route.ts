@@ -5,7 +5,7 @@ import Stripe from 'stripe'
 import { STRIPE_CONFIG } from '@/lib/stripe-config'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-12-18.acacia',
+  apiVersion: '2025-08-27.basil',
 })
 
 export async function POST(req: NextRequest) {
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -34,15 +34,15 @@ export async function POST(req: NextRequest) {
 
     // Get the authenticated user
     const {
-      data: { session },
+      data: { session: authSession },
       error: authError,
     } = await supabase.auth.getSession()
 
-    if (authError || !session) {
+    if (authError || !authSession) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const user = session.user
+    const user = authSession.user
 
     // Get or create Stripe customer
     let customer: Stripe.Customer
@@ -112,10 +112,10 @@ export async function POST(req: NextRequest) {
     const session = await stripe.checkout.sessions.create(sessionConfig)
 
     return NextResponse.json({ url: session.url })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Checkout error:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to create checkout session' },
+      { error: error instanceof Error ? error.message : 'Failed to create checkout session' },
       { status: 500 }
     )
   }

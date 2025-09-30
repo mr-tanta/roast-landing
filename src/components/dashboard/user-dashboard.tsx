@@ -1,21 +1,21 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { useAuth } from '@/contexts/auth-context'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { toast } from 'sonner'
-import { 
-  User, 
-  CreditCard, 
-  BarChart3, 
-  Settings, 
+import {
+  User,
+  CreditCard,
+  BarChart3,
+  Settings,
   Crown,
   Zap,
   TrendingUp,
-  Calendar,
   ExternalLink
 } from 'lucide-react'
 
@@ -26,7 +26,14 @@ interface UserStats {
   subscription_tier: 'free' | 'trial' | 'pro'
   subscription_status: string
   trial_ends_at?: string
-  recent_roasts: any[]
+  recent_roasts: Array<{
+    id: string
+    url: string
+    domain?: string
+    score: number
+    created_at: string
+    status: string
+  }>
 }
 
 export function UserDashboard() {
@@ -228,7 +235,7 @@ export function UserDashboard() {
             <div className="text-center py-6">
               <p className="text-muted-foreground">No roasts yet</p>
               <Button className="mt-2" asChild>
-                <a href="/">Create Your First Roast</a>
+                <Link href="/">Create Your First Roast</Link>
               </Button>
             </div>
           )}

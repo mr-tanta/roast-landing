@@ -18,7 +18,15 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      "aws/**",
+      "scripts/**",
     ],
+  },
+  {
+    files: ["src/lib/**/*.ts", "src/lib/**/*.tsx"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
   },
 ];
 

@@ -1,5 +1,4 @@
-import { chromium, type Browser, type Page } from 'playwright-core'
-import chromium_pkg from 'playwright-core/lib/server/chromium'
+import { chromium, type Browser } from 'playwright-core'
 
 let browser: Browser | null = null
 

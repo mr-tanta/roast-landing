@@ -254,8 +254,8 @@ RULES:
     const allIssues = results.flatMap((r) => r.issues)
     const uniqueIssues = this.deduplicateIssues(allIssues)
       .sort((a, b) => {
-        const impactOrder = { high: 0, medium: 1, low: 2 }
-        return impactOrder[a.impact] - impactOrder[b.impact]
+        const impactOrder: Record<'high' | 'medium' | 'low', number> = { high: 0, medium: 1, low: 2 }
+        return impactOrder[a.impact as 'high' | 'medium' | 'low'] - impactOrder[b.impact as 'high' | 'medium' | 'low']
       })
       .slice(0, 3)
 

@@ -83,6 +83,50 @@ jobs:
           echo "- **Lambda Changed:** ${{ steps.changes.outputs.lambda }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Frontend Changed:** ${{ steps.changes.outputs.frontend }}" >> $GITHUB_STEP_SUMMARY
 
+      - name: 📢 Notify Slack - Pipeline Start
+        if: steps.env-setup.outputs.should-deploy == 'true'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          channel: '#deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          custom_payload: |
+            {
+              "text": "🚀 RoastMyLanding Deployment Pipeline Started",
+              "attachments": [
+                {
+                  "color": "#36a64f",
+                  "fields": [
+                    {
+                      "title": "Repository",
+                      "value": "${{ github.repository }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Environment",
+                      "value": "${{ steps.env-setup.outputs.environment }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Commit",
+                      "value": "`${{ github.sha }}`.substring(0, 7)",
+                      "short": true
+                    },
+                    {
+                      "title": "Author",
+                      "value": "${{ github.actor }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Changes",
+                      "value": "Frontend: ${{ steps.changes.outputs.frontend == 'true' && '✅' || '❌' }} | Lambda: ${{ steps.changes.outputs.lambda == 'true' && '✅' || '❌' }}",
+                      "short": false
+                    }
+                  ]
+                }
+              ]
+            }
+
   # Security and compliance checks
   security:
     name: 🔒 Security & Compliance
@@ -452,6 +496,10 @@ jobs:
               "NODE_ENV": "production",
               "CACHE_TABLE_NAME": "roast_cache",
               "SQS_QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/379355014259/roastmylanding-screenshot-jobs-lean",
+              "AWS_REGION": "${{ secrets.AWS_REGION }}",
+              "S3_BUCKET": "${{ secrets.S3_BUCKET }}",
+              "CLOUDFRONT_DOMAIN": "${{ secrets.CLOUDFRONT_DOMAIN }}",
+              "CLOUDFRONT_DISTRIBUTION_ID": "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}",
               "REDIS_HOST": "${{ secrets.REDIS_HOST }}",
               "REDIS_PORT": "${{ secrets.REDIS_PORT }}",
               "REDIS_PASSWORD": "${{ secrets.REDIS_PASSWORD }}",

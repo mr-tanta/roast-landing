@@ -5,14 +5,14 @@
 
 export const STRIPE_CONFIG = {
   products: {
-    trial: 'prod_T9K6Va5thzIWW3',
-    monthly: 'prod_T9K6WZ2BUFIdhc', 
-    annual: 'prod_T9K6cROzP3B73e',
+    trial: 'prod_T9OsK75Kt06Zkm',
+    monthly: 'prod_T9Otomcn3rkdph', 
+    annual: 'prod_T9OtpgxohFOVwL',
   },
   prices: {
-    trial: 'price_1SD1SCJ6OiwDDp6nfXpjEtr3',      // $1.00 one-time
-    monthly: 'price_1SD1SYJ6OiwDDp6nu5mdeXGI',    // $19.00/month
-    annual: 'price_1SD1SfJ6OiwDDp6ncJYPspxs',     // $190.00/year
+    trial: 'price_1SD65rJ6OiwDDp6nAy5oXFjq',      // $4.99 one-time
+    monthly: 'price_1SD666J6OiwDDp6nMEprEyAK',    // $29.00/month
+    annual: 'price_1SD66IJ6OiwDDp6nN6m4KJ5e',     // $290.00/year
   },
   plans: {
     free: {
@@ -32,29 +32,28 @@ export const STRIPE_CONFIG = {
       }
     },
     trial: {
-      name: '3-Day Trial',
-      description: 'Unlimited access for 3 days',
-      price: '$1',
-      priceId: 'price_1SD1SCJ6OiwDDp6nfXpjEtr3',
+      name: 'Free Trial',
+      description: 'Get started with 5 premium roasts',
+      price: '$4.99',
+      priceId: 'price_1SD65rJ6OiwDDp6nAy5oXFjq',
       features: [
-        'Unlimited roasts for 3 days',
+        '5 premium roasts',
         'Full AI analysis',
         'Screenshots included',
         'No watermarks',
         'Priority processing'
       ],
       limits: {
-        roastsPerDay: -1, // unlimited
+        roastsTotal: 5, // total roasts allowed
         screenshots: true,
-        watermark: false,
-        duration: 3 * 24 * 60 * 60 * 1000 // 3 days in milliseconds
+        watermark: false
       }
     },
     monthly: {
       name: 'Pro Monthly',
       description: 'Unlimited roasts every month',
-      price: '$19',
-      priceId: 'price_1SD1SYJ6OiwDDp6nu5mdeXGI',
+      price: '$29',
+      priceId: 'price_1SD666J6OiwDDp6nMEprEyAK',
       features: [
         'Unlimited roasts',
         'Full AI analysis',
@@ -73,9 +72,9 @@ export const STRIPE_CONFIG = {
     annual: {
       name: 'Pro Annual',
       description: 'Best value - 17% savings!',
-      price: '$190',
-      originalPrice: '$228',
-      priceId: 'price_1SD1SfJ6OiwDDp6ncJYPspxs',
+      price: '$290',
+      originalPrice: '$348',
+      priceId: 'price_1SD66IJ6OiwDDp6nN6m4KJ5e',
       badge: 'BEST VALUE',
       features: [
         'Unlimited roasts',

@@ -5,28 +5,29 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-12-18.acacia',
+  apiVersion: '2025-08-27.basil',
 })
 
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!
 
 export async function POST(req: NextRequest) {
   const body = await req.text()
-  const sig = headers().get('stripe-signature')!
+  const sig = (await headers()).get('stripe-signature')!
 
   let event: Stripe.Event
 
   try {
     event = stripe.webhooks.constructEvent(body, sig, endpointSecret)
-  } catch (err: any) {
-    console.error(`Webhook signature verification failed.`, err.message)
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+    console.error(`Webhook signature verification failed.`, errorMessage)
     return NextResponse.json(
-      { error: `Webhook Error: ${err.message}` },
+      { error: `Webhook Error: ${errorMessage}` },
       { status: 400 }
     )
   }
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!, // Use service role for admin operations
@@ -74,11 +75,11 @@ export async function POST(req: NextRequest) {
         const priceId = subscription.items.data[0]?.price.id
         let subscriptionTier = 'free'
         
-        if (priceId === 'price_1SD1SCJ6OiwDDp6nfXpjEtr3') { // Trial
+        if (priceId === 'price_1SD65rJ6OiwDDp6nAy5oXFjq') { // Trial - $4.99
           subscriptionTier = 'trial'
-        } else if (priceId === 'price_1SD1SYJ6OiwDDp6nu5mdeXGI') { // Monthly
+        } else if (priceId === 'price_1SD666J6OiwDDp6nMEprEyAK') { // Monthly - $29
           subscriptionTier = 'pro'
-        } else if (priceId === 'price_1SD1SfJ6OiwDDp6ncJYPspxs') { // Annual
+        } else if (priceId === 'price_1SD66IJ6OiwDDp6nN6m4KJ5e') { // Annual - $290
           subscriptionTier = 'pro'
         }
 
@@ -128,9 +129,12 @@ export async function POST(req: NextRequest) {
       }
 
       case 'invoice.payment_succeeded': {
-        const invoice = event.data.object as Stripe.Invoice
-        
-        if (invoice.subscription) {
+        const invoice = event.data.object
+        const subscriptionId = (invoice as { subscription?: string | { id: string } }).subscription
+
+        if (subscriptionId) {
+          const subId = typeof subscriptionId === 'string' ? subscriptionId : subscriptionId.id
+
           // Update subscription status to active
           const { error: updateError } = await supabase
             .from('users')
@@ -138,7 +142,7 @@ export async function POST(req: NextRequest) {
               subscription_status: 'active',
               updated_at: new Date().toISOString(),
             })
-            .eq('stripe_subscription_id', invoice.subscription)
+            .eq('stripe_subscription_id', subId)
 
           if (updateError) {
             console.error('Failed to update subscription status:', updateError)
@@ -149,9 +153,12 @@ export async function POST(req: NextRequest) {
       }
 
       case 'invoice.payment_failed': {
-        const invoice = event.data.object as Stripe.Invoice
-        
-        if (invoice.subscription) {
+        const invoice = event.data.object
+        const subscriptionId = (invoice as { subscription?: string | { id: string } }).subscription
+
+        if (subscriptionId) {
+          const subId = typeof subscriptionId === 'string' ? subscriptionId : subscriptionId.id
+
           // Update subscription status to past_due
           const { error: updateError } = await supabase
             .from('users')
@@ -159,7 +166,7 @@ export async function POST(req: NextRequest) {
               subscription_status: 'past_due',
               updated_at: new Date().toISOString(),
             })
-            .eq('stripe_subscription_id', invoice.subscription)
+            .eq('stripe_subscription_id', subId)
 
           if (updateError) {
             console.error('Failed to update subscription status:', updateError)

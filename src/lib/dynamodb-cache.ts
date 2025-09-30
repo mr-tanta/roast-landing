@@ -1,8 +1,11 @@
-import { DynamoDB } from 'aws-sdk'
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb'
 
-const dynamodb = new DynamoDB.DocumentClient({
+const client = new DynamoDBClient({
   region: process.env.AWS_REGION || 'us-east-1'
 })
+
+const dynamodb = DynamoDBDocumentClient.from(client)
 
 const TABLE_NAME = process.env.CACHE_TABLE_NAME || 'roast_cache'
 
@@ -15,10 +18,10 @@ export class DynamoDBCacheManager {
 
   static async get<T>(key: string, layer: keyof typeof this.LAYERS = 'WARM'): Promise<T | null> {
     try {
-      const result = await dynamodb.get({
+      const result = await dynamodb.send(new GetCommand({
         TableName: TABLE_NAME,
         Key: { pk: key }
-      }).promise()
+      }))
 
       if (!result.Item) {
         return null
@@ -51,7 +54,7 @@ export class DynamoDBCacheManager {
     try {
       const ttl = Math.floor(Date.now() / 1000) + this.LAYERS[layer].ttl
 
-      await dynamodb.put({
+      await dynamodb.send(new PutCommand({
         TableName: TABLE_NAME,
         Item: {
           pk: key,
@@ -60,7 +63,7 @@ export class DynamoDBCacheManager {
           layer: layer,
           createdAt: new Date().toISOString()
         }
-      }).promise()
+      }))
     } catch (error) {
       console.error('DynamoDB cache set error:', error)
     }
@@ -70,7 +73,7 @@ export class DynamoDBCacheManager {
     const hotTtl = Math.floor(Date.now() / 1000) + this.LAYERS.HOT.ttl
 
     try {
-      await dynamodb.put({
+      await dynamodb.send(new PutCommand({
         TableName: TABLE_NAME,
         Item: {
           pk: key,
@@ -79,7 +82,7 @@ export class DynamoDBCacheManager {
           layer: 'HOT',
           createdAt: new Date().toISOString()
         }
-      }).promise()
+      }))
     } catch (error) {
       console.error('DynamoDB promote to hot error:', error)
     }
@@ -87,10 +90,10 @@ export class DynamoDBCacheManager {
 
   static async delete(key: string): Promise<void> {
     try {
-      await dynamodb.delete({
+      await dynamodb.send(new DeleteCommand({
         TableName: TABLE_NAME,
         Key: { pk: key }
-      }).promise()
+      }))
     } catch (error) {
       console.error('DynamoDB cache delete error:', error)
     }
@@ -106,28 +109,39 @@ export class DynamoDBCacheManager {
 // Maintain compatibility with existing CacheManager interface
 export class CacheManager {
   static async get<T>(key: string): Promise<T | null> {
-    const cacheBackend = process.env.CACHE_BACKEND || 'dynamodb'
+    const cacheBackend = process.env.CACHE_BACKEND || 'redis'
     
     if (cacheBackend === 'redis') {
-      // Use Redis if explicitly configured
-      const { redis } = await import('./redis')
-      return await redis.get<T>(key) 
+      // Use Redis (default)
+      try {
+        const { redis } = await import('./redis')
+        const result = await redis.get(key)
+        return result as T | null
+      } catch (error) {
+        console.warn('Redis cache unavailable, falling back to DynamoDB:', error)
+        return await DynamoDBCacheManager.get<T>(key)
+      }
     }
     
-    // Default to DynamoDB
+    // Use DynamoDB if explicitly configured
     return await DynamoDBCacheManager.get<T>(key)
   }
 
   static async set<T>(key: string, value: T, layer: string = 'WARM'): Promise<void> {
-    const cacheBackend = process.env.CACHE_BACKEND || 'dynamodb'
+    const cacheBackend = process.env.CACHE_BACKEND || 'redis'
     
     if (cacheBackend === 'redis') {
-      // Use Redis if explicitly configured
-      const { CacheManager: RedisCacheManager } = await import('./redis')
-      return await RedisCacheManager.set<T>(key, value, layer as any)
+      // Use Redis (default)
+      try {
+        const { CacheManager: RedisCacheManager } = await import('./redis')
+        return await RedisCacheManager.set<T>(key, value, layer as any)
+      } catch (error) {
+        console.warn('Redis cache unavailable, falling back to DynamoDB:', error)
+        return await DynamoDBCacheManager.set<T>(key, value, layer as any)
+      }
     }
     
-    // Default to DynamoDB
+    // Use DynamoDB if explicitly configured
     return await DynamoDBCacheManager.set<T>(key, value, layer as any)
   }
 

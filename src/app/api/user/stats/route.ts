@@ -4,7 +4,7 @@ import { cookies } from 'next/headers'
 
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -36,7 +36,49 @@ export async function GET(request: NextRequest) {
       .eq('id', userId)
       .single()
 
-    if (profileError) {
+    // If user profile doesn't exist, create it using service role
+    if (profileError && profileError.code === 'PGRST116') {
+      // Create admin client with service role for user creation
+      const adminSupabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          cookies: {
+            get(name: string) {
+              return cookieStore.get(name)?.value
+            },
+          },
+        }
+      )
+      
+      const { data: newProfile, error: createError } = await adminSupabase
+        .from('users')
+        .insert({
+          id: userId,
+          email: session.user.email!,
+          name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email!.split('@')[0],
+          avatar_url: session.user.user_metadata?.avatar_url,
+          subscription_tier: 'free',
+          subscription_status: 'inactive',
+        })
+        .select()
+        .single()
+      
+      if (createError) {
+        console.error('Failed to create user profile:', createError)
+        return NextResponse.json({ error: 'Failed to create user profile' }, { status: 500 })
+      }
+      
+      return NextResponse.json({
+        total_roasts: 0,
+        daily_roasts: 0,
+        daily_limit: 3,
+        subscription_tier: 'free',
+        subscription_status: 'inactive',
+        trial_ends_at: null,
+        recent_roasts: [],
+      })
+    } else if (profileError) {
       console.error('Profile error:', profileError)
       return NextResponse.json({ error: 'Failed to fetch user profile' }, { status: 500 })
     }
