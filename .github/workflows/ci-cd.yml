@@ -26,7 +26,6 @@ env:
   AWS_REGION: 'us-east-1'
   PROJECT_NAME: 'roastmylanding'
   SLACK_CHANNEL: '#deployments'
-  WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
 jobs:
   # Pre-flight checks and setup
@@ -88,10 +87,11 @@ jobs:
       - name: 📢 Notify Slack - Pipeline Start
         if: steps.env-setup.outputs.should-deploy == 'true'
         uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: custom
           channel: '#deployments'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
           custom_payload: |
             {
               "text": "🚀 RoastMyLanding Deployment Pipeline Started",
@@ -425,10 +425,11 @@ jobs:
       - name: 📢 Notify Slack - Staging
         if: always()
         uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: ${{ job.status }}
           channel: '#deployments'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
           fields: repo,message,commit,author,action,eventName,ref,workflow
           custom_payload: |
             {
@@ -555,10 +556,11 @@ jobs:
       - name: 📢 Notify Slack - Production
         if: always()
         uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: ${{ job.status }}
           channel: '#deployments'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
           fields: repo,message,commit,author,action,eventName,ref,workflow
           custom_payload: |
             {
@@ -606,10 +608,11 @@ jobs:
     steps:
       - name: 🚨 Notify Slack - Pipeline Failure
         uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: failure
-          channel: '${{ env.SLACK_CHANNEL }}'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          channel: '#deployments'
           custom_payload: |
             {
               "text": "🚨 RoastMyLanding Pipeline FAILED",
@@ -695,10 +698,11 @@ jobs:
       - name: 🎉 Notify Slack - Pipeline Success
         if: "!contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')"
         uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: success
-          channel: '${{ env.SLACK_CHANNEL }}'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          channel: '#deployments'
           custom_payload: |
             {
               "text": "🎉 RoastMyLanding Pipeline Completed Successfully!",
