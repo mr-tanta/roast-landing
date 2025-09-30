@@ -1,0 +1,65 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject", 
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::roastmylanding-screenshots-prod",
+        "arn:aws:s3:::roastmylanding-screenshots-prod/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateInvalidation",
+        "cloudfront:GetInvalidation",
+        "cloudfront:ListInvalidations"
+      ],
+      "Resource": "arn:aws:cloudfront::379355014259:distribution/E1SODPIQ8Y9GOM"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem", 
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:379355014259:table/roast_cache"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lambda:InvokeFunction",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration"
+      ],
+      "Resource": "arn:aws:lambda:us-east-1:379355014259:function:*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "amplify:StartJob",
+        "amplify:StopJob",
+        "amplify:GetJob",
+        "amplify:ListJobs",
+        "amplify:GetApp",
+        "amplify:GetBranch",
+        "amplify:ListBranches"
+      ],
+      "Resource": [
+        "arn:aws:amplify:us-east-1:379355014259:apps/d29z8nh5m7c4h1",
+        "arn:aws:amplify:us-east-1:379355014259:apps/d29z8nh5m7c4h1/branches/*",
+        "arn:aws:amplify:us-east-1:379355014259:apps/d29z8nh5m7c4h1/branches/*/jobs/*"
+      ]
+    }
+  ]
+}
