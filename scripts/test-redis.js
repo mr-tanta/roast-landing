@@ -5,7 +5,7 @@
  * Tests connection to the custom Redis server and basic cache operations
  */
 
-require('dotenv').config({ path: '.env.local' })
+require('dotenv').config({ path: '../.env.local' })
 const Redis = require('ioredis')
 
 const REDIS_CONFIG = {
