@@ -474,95 +474,75 @@ jobs:
               ]
             }
 
-  # Production deployment (requires approval)
+  # Production deployment (Amplify)
   deploy-production:
-    name: Deploy to Production
+    name: Deploy to Production (Amplify)
     runs-on: ubuntu-latest
     needs: [frontend, integration-tests]
-    if: false
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment:
       name: production
       url: https://roastmylanding.com
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 📥 Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: lambda-deployment
-          path: ./
-
-      - name: ⚡ Deploy Lambda to Production
+      - name: Trigger Amplify Deployment
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          aws lambda update-function-code \
-            --function-name roastmylanding-roast-handler \
-            --zip-file fileb://lambda-deployment.zip \
-            --region ${{ env.AWS_REGION }}
+          echo "Triggering Amplify deployment for RoastMyLanding..."
+          aws amplify start-job \
+            --app-id d2fkxpg9vn5h9c \
+            --branch-name main \
+            --job-type RELEASE \
+            --region us-east-1
           
-          # Update environment variables if needed
-          aws lambda update-function-configuration \
-            --function-name roastmylanding-roast-handler \
-            --environment Variables='{
-              "NODE_ENV": "production",
-              "CACHE_TABLE_NAME": "roast_cache",
-              "SQS_QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/379355014259/roastmylanding-screenshot-jobs-lean",
-              "AWS_REGION": "${{ secrets.AWS_REGION }}",
-              "S3_BUCKET": "${{ secrets.S3_BUCKET }}",
-              "CLOUDFRONT_DOMAIN": "${{ secrets.CLOUDFRONT_DOMAIN }}",
-              "CLOUDFRONT_DISTRIBUTION_ID": "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}",
-              "REDIS_HOST": "${{ secrets.REDIS_HOST }}",
-              "REDIS_PORT": "${{ secrets.REDIS_PORT }}",
-              "REDIS_PASSWORD": "${{ secrets.REDIS_PASSWORD }}",
-              "REDIS_DB": "${{ secrets.REDIS_DB }}",
-              "REDIS_URL": "${{ secrets.REDIS_URL }}"
-            }' \
-            --region ${{ env.AWS_REGION }}
-          
-          echo "✅ Lambda deployed to production"
+          echo "Amplify deployment triggered successfully"
 
-      - name: 🧪 Production smoke tests
+      - name: Production smoke tests
         run: |
           echo "Running production smoke tests..."
-          sleep 15  # Wait for Lambda to be ready
+          sleep 30  # Wait for Amplify deployment to be ready
           
-          API_URL="https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod"
+          AMPLIFY_URL="https://d2fkxpg9vn5h9c.amplifyapp.com"
           
-          # Critical path test
-          RESPONSE=$(curl -s -X POST "$API_URL/roast" \
-            -H "Content-Type: application/json" \
-            -d '{"url": "https://production-test.example.com"}')
+          # Health check test
+          HEALTH_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$AMPLIFY_URL/health" || echo "000")
+          echo "Health check status: $HEALTH_STATUS"
           
-          if echo "$RESPONSE" | grep -q "roast" && echo "$RESPONSE" | grep -q "score"; then
-            echo "✅ Production deployment successful"
-            echo "## 🎉 Production Deployment Success" >> $GITHUB_STEP_SUMMARY
-            echo "- API endpoint responding correctly" >> $GITHUB_STEP_SUMMARY
+          # Frontend availability test
+          FRONTEND_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$AMPLIFY_URL" || echo "000")
+          echo "Frontend status: $FRONTEND_STATUS"
+          
+          if [[ "$HEALTH_STATUS" == "200" ]] && [[ "$FRONTEND_STATUS" == "200" ]]; then
+            echo "Production deployment successful"
+            echo "## Production Deployment Success" >> $GITHUB_STEP_SUMMARY
+            echo "- Frontend responding correctly" >> $GITHUB_STEP_SUMMARY
+            echo "- Health endpoint accessible" >> $GITHUB_STEP_SUMMARY
             echo "- All smoke tests passed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Production smoke test failed"
-            echo "Response: $RESPONSE"
+            echo "Production smoke test failed"
+            echo "Health Status: $HEALTH_STATUS, Frontend Status: $FRONTEND_STATUS"
             exit 1
           fi
 
-      - name: 📊 Post-deployment metrics
+      - name: Post-deployment metrics
         run: |
           echo "Collecting post-deployment metrics..."
-          API_URL="https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod"
+          AMPLIFY_URL="https://d2fkxpg9vn5h9c.amplifyapp.com"
           
           # Response time test
           START_TIME=$(date +%s%3N)
-          curl -s -X POST "$API_URL/roast" \
-            -H "Content-Type: application/json" \
-            -d '{"url": "https://metrics-test.example.com"}' > /dev/null
+          curl -s "$AMPLIFY_URL" > /dev/null
           END_TIME=$(date +%s%3N)
           RESPONSE_TIME=$((END_TIME - START_TIME))
           
-          echo "## 📊 Performance Metrics" >> $GITHUB_STEP_SUMMARY
-          echo "- **API Response Time:** ${RESPONSE_TIME}ms" >> $GITHUB_STEP_SUMMARY
+          echo "## Performance Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend Response Time:** ${RESPONSE_TIME}ms" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployment Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "- **Amplify URL:** $AMPLIFY_URL" >> $GITHUB_STEP_SUMMARY
 
       - name: 📢 Notify Slack - Production
         if: always()
@@ -575,7 +555,7 @@ jobs:
           fields: repo,message,commit,author,action,eventName,ref,workflow
           custom_payload: |
             {
-              "text": "${{ job.status }}" === "success" ? "🎉 Production Deployment Successful!" : "🚨 Production Deployment Failed!",
+              "text": "${{ job.status }}" === "success" ? "Production Deployment Successful!" : "Production Deployment Failed!",
               "attachments": [
                 {
                   "color": "${{ job.status }}" === "success" ? "good" : "danger",
@@ -587,7 +567,7 @@ jobs:
                     },
                     {
                       "title": "Environment",
-                      "value": "Production",
+                      "value": "Production (AWS Amplify)",
                       "short": true
                     },
                     {
@@ -601,8 +581,8 @@ jobs:
                       "short": true
                     },
                     {
-                      "title": "API Endpoint",
-                      "value": "https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod",
+                      "title": "Live URL",
+                      "value": "https://d2fkxpg9vn5h9c.amplifyapp.com",
                       "short": false
                     }
                   ]
