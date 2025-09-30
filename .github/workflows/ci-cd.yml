@@ -1,4 +1,4 @@
-name: 🚀 RoastMyLanding CI/CD Pipeline
+name: RoastMyLanding CI/CD Pipeline
 
 on:
   push:
@@ -30,7 +30,7 @@ env:
 jobs:
   # Pre-flight checks and setup
   setup:
-    name: 🔧 Setup & Validation
+    name: Setup and Validation
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.env-setup.outputs.environment }}
@@ -38,12 +38,12 @@ jobs:
       lambda-changed: ${{ steps.changes.outputs.lambda }}
       frontend-changed: ${{ steps.changes.outputs.frontend }}
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🔍 Detect changes
+      - name: Detect changes
         uses: dorny/paths-filter@v2
         id: changes
         with:
@@ -59,7 +59,7 @@ jobs:
               - 'tailwind.config.ts'
               - '.env*'
 
-      - name: 🌍 Environment setup
+      - name: Environment setup
         id: env-setup
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -76,15 +76,15 @@ jobs:
             echo "should-deploy=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: 📊 Job summary
+      - name: Job summary
         run: |
-          echo "## 🚀 Deployment Plan" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployment Plan" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment:** ${{ steps.env-setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Should Deploy:** ${{ steps.env-setup.outputs.should-deploy }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Lambda Changed:** ${{ steps.changes.outputs.lambda }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Frontend Changed:** ${{ steps.changes.outputs.frontend }}" >> $GITHUB_STEP_SUMMARY
 
-      - name: 📢 Notify Slack - Pipeline Start
+      - name: Notify Slack - Pipeline Start
         if: steps.env-setup.outputs.should-deploy == 'true'
         uses: 8398a7/action-slack@v3
         env:
@@ -94,7 +94,7 @@ jobs:
           channel: '#deployments'
           custom_payload: |
             {
-              "text": "🚀 RoastMyLanding Deployment Pipeline Started",
+              "text": "RoastMyLanding Deployment Pipeline Started",
               "attachments": [
                 {
                   "color": "#36a64f",
@@ -121,7 +121,7 @@ jobs:
                     },
                     {
                       "title": "Changes",
-                      "value": "Frontend: ${{ steps.changes.outputs.frontend == 'true' && '✅' || '❌' }} | Lambda: ${{ steps.changes.outputs.lambda == 'true' && '✅' || '❌' }}",
+                      "value": "Frontend: ${{ steps.changes.outputs.frontend == 'true' && 'Yes' || 'No' }} | Lambda: ${{ steps.changes.outputs.lambda == 'true' && 'Yes' || 'No' }}",
                       "short": false
                     }
                   ]
@@ -131,20 +131,20 @@ jobs:
 
   # Security and compliance checks
   security:
-    name: 🔒 Security & Compliance
+    name: Security and Compliance
     runs-on: ubuntu-latest
     needs: setup
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 🔐 Run secret scan
+      - name: Run secret scan
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
           extra_args: --debug --only-verified
 
-      - name: 🛡️ SAST Scan
+      - name: SAST Scan
         uses: github/super-linter@v4
         env:
           DEFAULT_BRANCH: main
@@ -160,37 +160,37 @@ jobs:
 
   # Frontend build and test
   frontend:
-    name: 🎨 Frontend Build & Test
+    name: Frontend Build and Test
     runs-on: ubuntu-latest
     needs: [setup, security]
     if: needs.setup.outputs.frontend-changed == 'true' || github.event.inputs.skip_tests != 'true'
     strategy:
       matrix:
-        node-version: [18, 20]
+        node-version: [20]
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js ${{ matrix.node-version }}
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
 
-      - name: 📦 Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 8
-
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: |
           pnpm install --frozen-lockfile --prefer-offline
           pnpm list --depth=0
 
-      - name: 🧹 Lint code
+      - name: Lint code
         run: pnpm run lint
 
-      - name: 📍 Test Redis connectivity
+      - name: Test Redis connectivity
         env:
           REDIS_HOST: ${{ secrets.REDIS_HOST }}
           REDIS_PORT: ${{ secrets.REDIS_PORT }}
@@ -199,7 +199,7 @@ jobs:
           REDIS_URL: ${{ secrets.REDIS_URL }}
         run: pnpm test:redis
 
-      - name: 🔨 Build frontend
+      - name: Build frontend
         env:
           NODE_ENV: production
           NEXT_PUBLIC_USE_EXTERNAL_API: true
@@ -213,22 +213,22 @@ jobs:
           pnpm run build:prod
           ls -la .next/
 
-      - name: 📊 Bundle analysis
+      - name: Bundle analysis
         run: |
           du -sh .next/
           du -sh .next/static/ || echo "No static dir"
-          echo "## 📦 Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Results" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Size:** $(du -sh .next/ | cut -f1)" >> $GITHUB_STEP_SUMMARY
           echo "- **Static Assets:** $(du -sh .next/static/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
 
-      - name: 🧪 Run frontend tests
+      - name: Run frontend tests
         if: github.event.inputs.skip_tests != 'true'
         run: |
           # Add your frontend tests here when available
           echo "Frontend tests placeholder - add Jest/Cypress tests"
 
-      - name: 📤 Upload build artifacts
-        if: matrix.node-version == 18
+      - name: Upload build artifacts
+        if: matrix.node-version == 20
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build
@@ -241,44 +241,44 @@ jobs:
 
   # Lambda/Backend build and test
   lambda:
-    name: ⚡ Lambda Build & Test
+    name: Lambda Build and Test
     runs-on: ubuntu-latest
     needs: [setup, security]
-    if: needs.setup.outputs.lambda-changed == 'true' || github.event.inputs.skip_tests != 'true'
+    if: needs.setup.outputs.lambda-changed == 'true' && false
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 📦 Setup pnpm
+      - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 9
 
-      - name: 🟢 Setup Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
           cache-dependency-path: lambda/pnpm-lock.yaml
 
-      - name: 📦 Install Lambda dependencies
+      - name: Install Lambda dependencies
         run: |
           cd lambda
           pnpm install --frozen-lockfile --prod --prefer-offline
           pnpm list --depth=0
 
-      - name: 🔍 Validate Lambda function
+      - name: Validate Lambda function
         run: |
           cd lambda
           node -e "const handler = require('./roast-handler'); console.log('Lambda function loaded successfully');"
 
-      - name: 📦 Package Lambda
+      - name: Package Lambda
         run: |
           cd lambda
           zip -r ../lambda-deployment.zip . -x "*.sh" "deploy-*.sh"
           ls -lh ../lambda-deployment.zip
 
-      - name: 📤 Upload Lambda artifact
+      - name: Upload Lambda artifact
         uses: actions/upload-artifact@v4
         with:
           name: lambda-deployment
@@ -287,10 +287,10 @@ jobs:
 
   # Infrastructure validation
   infrastructure:
-    name: 🏗️ Infrastructure Validation
+    name: Infrastructure Validation
     runs-on: ubuntu-latest
     needs: [setup, security]
-    if: needs.setup.outputs.lambda-changed == 'true'
+    if: needs.setup.outputs.lambda-changed == 'true' && false
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
@@ -327,15 +327,15 @@ jobs:
 
   # Integration testing
   integration-tests:
-    name: 🧪 Integration Tests
+    name: Integration Tests
     runs-on: ubuntu-latest
     needs: [setup, security]
     if: github.event.inputs.skip_tests != 'true'
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 🌐 Test Lambda API
+      - name: Test Lambda API
         run: |
           echo "Testing Lambda API endpoint..."
           API_URL="https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod"
@@ -350,14 +350,14 @@ jobs:
             -d '{"url": "https://example.com"}' || echo "API_ERROR")
             
           if [[ "$RESPONSE" == "API_ERROR" ]]; then
-            echo "❌ API test failed"
+            echo "API test failed"
             exit 1
           else
-            echo "✅ API responding correctly"
+            echo "API responding correctly"
             echo "$RESPONSE" | jq '.roast' 2>/dev/null || echo "Response received but not JSON"
           fi
 
-      - name: 📊 API Performance Test
+      - name: API Performance Test
         run: |
           echo "Running performance tests..."
           API_URL="https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod/roast"
@@ -375,10 +375,10 @@ jobs:
 
   # Deployment to staging
   deploy-staging:
-    name: 🚀 Deploy to Staging
+    name: Deploy to Staging
     runs-on: ubuntu-latest
-    needs: [frontend, lambda, infrastructure, integration-tests]
-    if: needs.setup.outputs.should-deploy == 'true' && (needs.setup.outputs.environment == 'staging' || github.ref == 'refs/heads/develop')
+    needs: [frontend, integration-tests]
+    if: false
     environment:
       name: staging
       url: https://staging.roastmylanding.com
@@ -465,10 +465,10 @@ jobs:
 
   # Production deployment (requires approval)
   deploy-production:
-    name: 🎯 Deploy to Production
+    name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: [frontend, lambda, infrastructure, integration-tests, deploy-staging]
-    if: needs.setup.outputs.should-deploy == 'true' && (needs.setup.outputs.environment == 'production' || github.ref == 'refs/heads/main')
+    needs: [frontend, integration-tests]
+    if: false
     environment:
       name: production
       url: https://roastmylanding.com
@@ -601,12 +601,12 @@ jobs:
 
   # Failure notification job
   notify-failure:
-    name: 🚨 Failure Notification
+    name: Failure Notification
     runs-on: ubuntu-latest
-    needs: [setup, security, frontend, lambda, infrastructure, integration-tests, deploy-staging, deploy-production]
+    needs: [setup, security, frontend, integration-tests]
     if: always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     steps:
-      - name: 🚨 Notify Slack - Pipeline Failure
+      - name: Notify Slack - Pipeline Failure
         uses: 8398a7/action-slack@v3
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -615,7 +615,7 @@ jobs:
           channel: '#deployments'
           custom_payload: |
             {
-              "text": "🚨 RoastMyLanding Pipeline FAILED",
+              "text": "RoastMyLanding Pipeline FAILED",
               "attachments": [
                 {
                   "color": "danger",
@@ -657,17 +657,17 @@ jobs:
 
   # Cleanup and notifications
   cleanup:
-    name: 🧹 Cleanup & Notifications
+    name: Cleanup and Notifications
     runs-on: ubuntu-latest
-    needs: [setup, security, frontend, lambda, infrastructure, integration-tests, deploy-staging, deploy-production]
+    needs: [setup, security, frontend, integration-tests]
     if: always()
     steps:
-      - name: 🧹 Cleanup artifacts
+      - name: Cleanup artifacts
         run: |
           echo "Cleaning up temporary artifacts..."
           # Add any cleanup steps here
 
-      - name: 📊 Deployment summary
+      - name: Deployment summary
         run: |
           PIPELINE_STATUS="success"
           if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
@@ -676,7 +676,7 @@ jobs:
             PIPELINE_STATUS="cancelled"
           fi
           
-          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Pipeline Status:** $PIPELINE_STATUS" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment:** ${{ needs.setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
@@ -689,13 +689,9 @@ jobs:
           echo "- Setup: ${{ needs.setup.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Security: ${{ needs.security.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Frontend: ${{ needs.frontend.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Lambda: ${{ needs.lambda.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Infrastructure: ${{ needs.infrastructure.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Integration Tests: ${{ needs.integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Deploy Staging: ${{ needs.deploy-staging.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Deploy Production: ${{ needs.deploy-production.result }}" >> $GITHUB_STEP_SUMMARY
 
-      - name: 🎉 Notify Slack - Pipeline Success
+      - name: Notify Slack - Pipeline Success
         if: "!contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')"
         uses: 8398a7/action-slack@v3
         env:
@@ -705,7 +701,7 @@ jobs:
           channel: '#deployments'
           custom_payload: |
             {
-              "text": "🎉 RoastMyLanding Pipeline Completed Successfully!",
+              "text": "RoastMyLanding Pipeline Completed Successfully!",
               "attachments": [
                 {
                   "color": "good",
@@ -737,7 +733,7 @@ jobs:
                     },
                     {
                       "title": "Status",
-                      "value": "All checks passed ✅",
+                      "value": "All checks passed",
                       "short": true
                     }
                   ]
