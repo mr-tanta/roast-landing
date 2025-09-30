@@ -262,4 +262,4 @@ MIT
 
 ## Support
 
-For support, email support@roastmylanding.com or join our Discord.
+For support, email support@roastmylanding.com or join our Discord.# Updated Slack webhook URL to correct workspace
