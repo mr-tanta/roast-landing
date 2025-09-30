@@ -88,7 +88,7 @@ jobs:
         if: steps.env-setup.outputs.should-deploy == 'true'
         uses: 8398a7/action-slack@v3
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: custom
           channel: '#deployments'
@@ -426,7 +426,7 @@ jobs:
         if: always()
         uses: 8398a7/action-slack@v3
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: ${{ job.status }}
           channel: '#deployments'
@@ -557,7 +557,7 @@ jobs:
         if: always()
         uses: 8398a7/action-slack@v3
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: ${{ job.status }}
           channel: '#deployments'
@@ -609,7 +609,7 @@ jobs:
       - name: 🚨 Notify Slack - Pipeline Failure
         uses: 8398a7/action-slack@v3
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: failure
           channel: '#deployments'
@@ -699,7 +699,7 @@ jobs:
         if: "!contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')"
         uses: 8398a7/action-slack@v3
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: success
           channel: '#deployments'
