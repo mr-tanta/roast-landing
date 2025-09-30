@@ -184,7 +184,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pnpm install --frozen-lockfile --prefer-offline
+          pnpm install --no-frozen-lockfile
           pnpm list --depth=0
 
       - name: Lint code
