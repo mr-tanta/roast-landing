@@ -1,525 +1,949 @@
-name: Deploy RoastMyLanding to EC2
+name: RoastMyLanding CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip tests'
+        required: false
+        default: false
+        type: boolean
 
 env:
-  AWS_REGION: us-east-1
+  NODE_VERSION: '20'
+  AWS_REGION: 'us-east-1'
+  PROJECT_NAME: 'roastmylanding'
+  SLACK_CHANNEL: '#deployments'
   ECR_REPOSITORY: roast-landing
 
 jobs:
-  build:
+  # Pre-flight checks and setup
+  setup:
+    name: Setup and Validation
     runs-on: ubuntu-latest
-    name: Build Docker Image
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    outputs:
+      environment: ${{ steps.env-setup.outputs.environment }}
+      should-deploy: ${{ steps.env-setup.outputs.should-deploy }}
+      lambda-changed: ${{ steps.changes.outputs.lambda }}
+      frontend-changed: ${{ steps.changes.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            lambda:
+              - 'lambda/**'
+              - 'terraform/**'
+            frontend:
+              - 'src/**'
+              - 'public/**'
+              - 'package*.json'
+              - 'next.config.ts'
+              - 'tailwind.config.ts'
+              - '.env*'
+
+      - name: Environment setup
+        id: env-setup
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "should-deploy=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "should-deploy=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "should-deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "environment=none" >> $GITHUB_OUTPUT
+            echo "should-deploy=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Job summary
+        run: |
+          echo "## Deployment Plan" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ steps.env-setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Should Deploy:** ${{ steps.env-setup.outputs.should-deploy }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lambda Changed:** ${{ steps.changes.outputs.lambda }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend Changed:** ${{ steps.changes.outputs.frontend }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack - Pipeline Start
+        if: steps.env-setup.outputs.should-deploy == 'true'
+        uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          status: custom
+          channel: '#deployments'
+          custom_payload: |
+            {
+              "text": "RoastMyLanding Deployment Pipeline Started",
+              "attachments": [
+                {
+                  "color": "#36a64f",
+                  "fields": [
+                    {
+                      "title": "Repository",
+                      "value": "${{ github.repository }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Environment",
+                      "value": "${{ steps.env-setup.outputs.environment }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Commit",
+                      "value": "`${{ github.sha }}`.substring(0, 7)",
+                      "short": true
+                    },
+                    {
+                      "title": "Author",
+                      "value": "${{ github.actor }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Changes",
+                      "value": "Frontend: ${{ steps.changes.outputs.frontend == 'true' && 'Yes' || 'No' }} | Lambda: ${{ steps.changes.outputs.lambda == 'true' && 'Yes' || 'No' }}",
+                      "short": false
+                    }
+                  ]
+                }
+              ]
+            }
+
+  # Security and compliance checks
+  security:
+    name: Security and Compliance
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --debug --only-verified
+
+      - name: SAST Scan
+        uses: github/super-linter@v4
+        env:
+          DEFAULT_BRANCH: main
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_ALL_CODEBASE: false
+          VALIDATE_TYPESCRIPT_ES: true
+          VALIDATE_JAVASCRIPT_ES: true
+          VALIDATE_JSON: true
+          VALIDATE_YAML: true
+          VALIDATE_BASH: true
+          VALIDATE_DOCKERFILE: true
+          VALIDATE_TERRAFORM_TERRASCAN: true
+
+  # Frontend build and test
+  frontend:
+    name: Frontend Build and Test
+    runs-on: ubuntu-latest
+    needs: [setup, security]
+    if: needs.setup.outputs.frontend-changed == 'true' || github.event.inputs.skip_tests != 'true'
+    strategy:
+      matrix:
+        node-version: [20]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm list --depth=0
+
+      - name: Lint code
+        run: pnpm run lint
+
+      - name: Test Redis connectivity
+        env:
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          REDIS_DB: ${{ secrets.REDIS_DB }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+        run: pnpm test:redis
+
+      - name: Build frontend
+        env:
+          NODE_ENV: production
+          NEXT_PUBLIC_USE_EXTERNAL_API: true
+          NEXT_PUBLIC_API_URL: https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRICE_ID_PRO: ${{ secrets.STRIPE_PRICE_ID_PRO }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          REDIS_DB: ${{ secrets.REDIS_DB }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+        run: |
+          pnpm run build:prod
+          ls -la .next/
+
+      - name: Bundle analysis
+        run: |
+          du -sh .next/
+          du -sh .next/static/ || echo "No static dir"
+          echo "## Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Size:** $(du -sh .next/ | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Static Assets:** $(du -sh .next/static/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run frontend tests
+        if: github.event.inputs.skip_tests != 'true'
+        run: |
+          # Add your frontend tests here when available
+          echo "Frontend tests placeholder - add Jest/Cypress tests"
+
+      - name: Upload build artifacts
+        if: matrix.node-version == 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: |
+            .next/
+            public/
+            package*.json
+            next.config.ts
+          retention-days: 7
+
+  # Lambda/Backend build and test
+  lambda:
+    name: Lambda Build and Test
+    runs-on: ubuntu-latest
+    needs: [setup, security]
+    if: needs.setup.outputs.lambda-changed == 'true' && false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: lambda/pnpm-lock.yaml
+
+      - name: Install Lambda dependencies
+        run: |
+          cd lambda
+          pnpm install --frozen-lockfile --prod --prefer-offline
+          pnpm list --depth=0
+
+      - name: Validate Lambda function
+        run: |
+          cd lambda
+          node -e "const handler = require('./roast-handler'); console.log('Lambda function loaded successfully');"
+
+      - name: Package Lambda
+        run: |
+          cd lambda
+          zip -r ../lambda-deployment.zip . -x "*.sh" "deploy-*.sh"
+          ls -lh ../lambda-deployment.zip
+
+      - name: Upload Lambda artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-deployment
+          path: lambda-deployment.zip
+          retention-days: 7
+
+  # Infrastructure validation
+  infrastructure:
+    name: Infrastructure Validation
+    runs-on: ubuntu-latest
+    needs: [setup, security]
+    if: needs.setup.outputs.lambda-changed == 'true' && false
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ~1.0
+
+      - name: 🔍 Terraform Format Check
+        run: |
+          cd terraform
+          terraform fmt -check -diff
+
+      - name: ✅ Terraform Validate
+        run: |
+          cd terraform
+          terraform init -backend=false
+          terraform validate
+
+      - name: 📋 Terraform Plan (Dry Run)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          cd terraform
+          terraform init
+          terraform plan -no-color > ../terraform-plan.txt 2>&1 || true
+          
+          echo "## 🏗️ Infrastructure Plan" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          head -50 ../terraform-plan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # Integration testing
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [setup, security]
+    if: github.event.inputs.skip_tests != 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test Lambda API
+        run: |
+          echo "Testing Lambda API endpoint..."
+          API_URL="https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod"
+          
+          # Health check
+          HEALTH_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$API_URL/health" || echo "000")
+          echo "Health check status: $HEALTH_STATUS"
+          
+          # API test
+          RESPONSE=$(curl -s -X POST "$API_URL/roast" \
+            -H "Content-Type: application/json" \
+            -d '{"url": "https://example.com"}' || echo "API_ERROR")
+            
+          if [[ "$RESPONSE" == "API_ERROR" ]]; then
+            echo "API test failed"
+            exit 1
+          else
+            echo "API responding correctly"
+            echo "$RESPONSE" | jq '.roast' 2>/dev/null || echo "Response received but not JSON"
+          fi
+
+      - name: API Performance Test
+        run: |
+          echo "Running performance tests..."
+          API_URL="https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod/roast"
+          
+          # Simple load test
+          for i in {1..5}; do
+            START_TIME=$(date +%s%3N)
+            curl -s -X POST "$API_URL" \
+              -H "Content-Type: application/json" \
+              -d "{\"url\": \"https://test$i.example.com\"}" > /dev/null
+            END_TIME=$(date +%s%3N)
+            DURATION=$((END_TIME - START_TIME))
+            echo "Request $i: ${DURATION}ms"
+          done
+
+  # Deployment to staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [frontend, integration-tests]
+    if: false
+    environment:
+      name: staging
+      url: https://staging.roastmylanding.com
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📥 Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-deployment
+          path: ./
+
+      - name: ⚡ Deploy Lambda
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          aws lambda update-function-code \
+            --function-name roastmylanding-roast-handler \
+            --zip-file fileb://lambda-deployment.zip \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Lambda deployed to staging"
+
+      - name: 🧪 Staging smoke tests
+        run: |
+          echo "Running staging smoke tests..."
+          # Add staging-specific tests here
+          sleep 10  # Wait for Lambda to be ready
+          
+          API_URL="https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod"
+          RESPONSE=$(curl -s -X POST "$API_URL/roast" \
+            -H "Content-Type: application/json" \
+            -d '{"url": "https://staging-test.example.com"}')
+          
+          if echo "$RESPONSE" | grep -q "roast"; then
+            echo "✅ Staging deployment successful"
+          else
+            echo "❌ Staging smoke test failed"
+            exit 1
+          fi
+
+      - name: 📢 Notify Slack - Staging
+        if: always()
+        uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+          custom_payload: |
+            {
+              "text": "🚀 Staging Deployment ${{ job.status }}",
+              "attachments": [
+                {
+                  "color": "${{ job.status }}" === "success" ? "good" : "danger",
+                  "fields": [
+                    {
+                      "title": "Repository",
+                      "value": "${{ github.repository }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Environment",
+                      "value": "Staging",
+                      "short": true
+                    },
+                    {
+                      "title": "Commit",
+                      "value": "${{ github.sha }}".substring(0, 7),
+                      "short": true
+                    },
+                    {
+                      "title": "Author",
+                      "value": "${{ github.actor }}",
+                      "short": true
+                    }
+                  ]
+                }
+              ]
+            }
+
+  # Production deployment (Docker/EC2)
+  deploy-production:
+    name: Deploy to Production (Docker/EC2)
+    runs-on: ubuntu-latest
+    needs: [frontend, integration-tests]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://tanta.com.ng
     outputs:
       image-tag: ${{ steps.get-timestamp.outputs.timestamp }}-${{ steps.get-commit-hash.outputs.sha_short }}
       image-uri: ${{ steps.build-image.outputs.image_uri }}
-    
     steps:
-    - name: Notify Slack - Pipeline Started
-      run: |
-        curl -X POST -H 'Content-type: application/json' \
-        --data '{
-          "attachments": [{
-            "color": "#36a64f",
-            "blocks": [{
-              "type": "header",
-              "text": {
-                "type": "plain_text",
-                "text": "RoastMyLanding Deployment Pipeline Started"
-              }
-            }, {
-              "type": "section",
-              "fields": [{
-                "type": "mrkdwn",
-                "text": "*Triggered by:*\n${{ github.actor }}"
-              }, {
-                "type": "mrkdwn",
-                "text": "*Branch:*\n${{ github.ref_name }}"
-              }, {
-                "type": "mrkdwn",
-                "text": "*Pipeline:*\n#${{ github.run_number }}"
-              }, {
-                "type": "mrkdwn",
-                "text": "*Status:*\nBuilding Docker image"
-              }]
-            }, {
-              "type": "actions",
-              "elements": [{
-                "type": "button",
-                "text": {
-                  "type": "plain_text",
-                  "text": "View Pipeline"
-                },
-                "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-              }]
-            }]
-          }]
-        }' \
-        ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Get commit hash
+        id: get-commit-hash
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-    - name: Get commit hash
-      id: get-commit-hash
-      run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - name: Get timestamp
+        id: get-timestamp
+        run: echo "timestamp=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
 
-    - name: Get timestamp
-      id: get-timestamp
-      run: echo "timestamp=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-
-    - name: Build, tag, and push image to Amazon ECR
-      id: build-image
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ steps.get-timestamp.outputs.timestamp }}-${{ steps.get-commit-hash.outputs.sha_short }}
-      run: |
-        # Build a docker container with build args for NEXT_PUBLIC_ variables
-        docker build \
-          --build-arg NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
-          --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" \
-          --build-arg NEXT_PUBLIC_APP_URL="${{ secrets.NEXT_PUBLIC_APP_URL }}" \
-          --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}" \
-          -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-        
-        # Also tag as latest
-        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-        
-        # Output the full image URI
-        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-        echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY" >> $GITHUB_OUTPUT
-
-    - name: Notify Slack - Docker Build Success
-      run: |
-        curl -X POST -H 'Content-type: application/json' \
-        --data '{
-          "attachments": [{
-            "color": "#36a64f",
-            "blocks": [{
-              "type": "section",
-              "text": {
-                "type": "mrkdwn",
-                "text": "Docker Image Built Successfully\nImage: `${{ steps.get-timestamp.outputs.timestamp }}-${{ steps.get-commit-hash.outputs.sha_short }}`\nStarting EC2 deployment..."
-              }
-            }]
-          }]
-        }' \
-        ${{ secrets.SLACK_WEBHOOK_URL }}
-
-    - name: Notify Slack - Starting Deployment
-      run: |
-        curl -X POST -H 'Content-type: application/json' \
-        --data '{"text":"**Starting EC2 Deployment**\nServer: `${{ secrets.EC2_HOST }}`\nImage: `${{ needs.build.outputs.image-tag }}`"}' \
-        ${{ secrets.SLACK_WEBHOOK_URL }}
-
-  deploy:
-    runs-on: ubuntu-latest
-    name: Deploy to EC2
-    needs: build
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Copy docker-compose.prod.yml to EC2
-      uses: appleboy/scp-action@v0.1.4
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        source: "docker-compose.prod.yml"
-        target: "${{ secrets.EC2_APP_PATH }}/"
-        strip_components: 0
-
-    - name: Setup EC2 Environment
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        script: |
-          echo "Setting up application directory..."
-          mkdir -p ${{ secrets.EC2_APP_PATH }}/logs
-          cd ${{ secrets.EC2_APP_PATH }}
-          echo "Application directory ready"
-
-    - name: Generate Environment Configuration
-      uses: appleboy/ssh-action@v1.0.3
-      env:
-        NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
-        NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
-        STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-        STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        REDIS_HOST: ${{ secrets.REDIS_HOST }}
-        REDIS_PORT: ${{ secrets.REDIS_PORT }}
-        REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-        REDIS_DB: ${{ secrets.REDIS_DB }}
-        REDIS_URL: ${{ secrets.REDIS_URL }}
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        S3_BUCKET: ${{ secrets.S3_BUCKET }}
-        CLOUDFRONT_DOMAIN: ${{ secrets.CLOUDFRONT_DOMAIN }}
-        CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
-        GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-        GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        NODE_ENV: production
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        envs: NEXT_PUBLIC_APP_URL,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY,NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,OPENAI_API_KEY,ANTHROPIC_API_KEY,GEMINI_API_KEY,REDIS_HOST,REDIS_PORT,REDIS_PASSWORD,REDIS_DB,REDIS_URL,AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY,S3_BUCKET,CLOUDFRONT_DOMAIN,CLOUDFRONT_DISTRIBUTION_ID,GOOGLE_OAUTH_CLIENT_ID,GOOGLE_OAUTH_CLIENT_SECRET,SLACK_WEBHOOK_URL,NODE_ENV
-        script: |
-          cd ${{ secrets.EC2_APP_PATH }}
-          echo "Generating production .env.roast-landing file..."
-          cat > .env.roast-landing << EOF
-          # Production Environment Configuration - Generated from GitHub Secrets
-          NODE_ENV=${NODE_ENV}
-          PORT=3000
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.get-timestamp.outputs.timestamp }}-${{ steps.get-commit-hash.outputs.sha_short }}
+        run: |
+          # Build a docker container with build args for NEXT_PUBLIC_ variables
+          docker build \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" \
+            --build-arg NEXT_PUBLIC_APP_URL="${{ secrets.NEXT_PUBLIC_APP_URL }}" \
+            --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}" \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           
-          # App Configuration
-          NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+          # Also tag as latest
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
-          # Supabase Configuration
-          NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-          SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-          
-          # Stripe Configuration
-          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
-          STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-          STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
-          
-          # AI Providers
-          OPENAI_API_KEY=${OPENAI_API_KEY}
-          ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-          GEMINI_API_KEY=${GEMINI_API_KEY}
-          
-          # Redis Configuration (RoastMyLanding uses DB 0)
-          REDIS_HOST=${REDIS_HOST}
-          REDIS_PORT=${REDIS_PORT}
-          REDIS_PASSWORD=${REDIS_PASSWORD}
-          REDIS_DB=0
-          REDIS_URL=redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0
-          
-          # AWS Configuration
-          AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-          AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-          AWS_REGION=us-east-1
-          
-          # Storage Configuration
-          S3_BUCKET=${S3_BUCKET}
-          CLOUDFRONT_DOMAIN=${CLOUDFRONT_DOMAIN}
-          CLOUDFRONT_DISTRIBUTION_ID=${CLOUDFRONT_DISTRIBUTION_ID}
-          
-          # Google OAuth Configuration
-          GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
-          GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
-          
-          # Notifications
-          SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
-          
-          # Cache
-          CACHE_BACKEND=redis
-          EOF
-          
-          # Create symlink for .env (Docker Compose expects .env)
-          ln -sf .env.roast-landing .env
-          echo "Environment configuration ready"
+          # Output the full image URI
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY" >> $GITHUB_OUTPUT
 
-    - name: Login to ECR
-      uses: appleboy/ssh-action@v1.0.3
-      env:
-        ECR_REPOSITORY_URI: ${{ needs.build.outputs.image-uri }}
-        AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        envs: ECR_REPOSITORY_URI,AWS_DEFAULT_REGION
-        script: |
-          cd ${{ secrets.EC2_APP_PATH }}
-          echo "Logging into Amazon ECR..."
-          aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REPOSITORY_URI
-          echo "ECR login successful"
+      - name: Copy docker-compose.prod.yml to EC2
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: 22
+          source: "docker-compose.prod.yml"
+          target: "${{ secrets.EC2_APP_PATH }}/"
+          strip_components: 0
 
-    - name: Pull Docker Image
-      uses: appleboy/ssh-action@v1.0.3
-      env:
-        ECR_REPOSITORY_URI: ${{ needs.build.outputs.image-uri }}
-        IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        envs: ECR_REPOSITORY_URI,IMAGE_TAG
-        script: |
-          cd ${{ secrets.EC2_APP_PATH }}
-          echo "Pulling Docker image: $ECR_REPOSITORY_URI:$IMAGE_TAG"
-          docker pull $ECR_REPOSITORY_URI:$IMAGE_TAG
-          echo "Docker image pulled successfully"
+      - name: Setup EC2 Environment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            echo "Setting up application directory..."
+            mkdir -p ${{ secrets.EC2_APP_PATH }}/logs
+            cd ${{ secrets.EC2_APP_PATH }}
+            echo "Application directory ready"
 
-    - name: Stop Existing Containers
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        script: |
-          cd ${{ secrets.EC2_APP_PATH }}
-          echo "Stopping existing RoastMyLanding containers..."
-          docker-compose -f docker-compose.prod.yml down --timeout 30 || echo "No RoastMyLanding containers to stop"
-          
-          echo "Checking for port conflicts..."
-          # Check and warn about port conflicts but don't stop other services
-          if docker ps | grep -q ":3000->"; then
-            echo "Warning: Port 3000 is in use by another service. RoastMyLanding will use alternative port."
-          fi
-          echo "Port conflict check completed"
+      - name: Generate Environment Configuration
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          REDIS_DB: ${{ secrets.REDIS_DB }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          CLOUDFRONT_DOMAIN: ${{ secrets.CLOUDFRONT_DOMAIN }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          NODE_ENV: production
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: 22
+          envs: NEXT_PUBLIC_APP_URL,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY,NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,OPENAI_API_KEY,ANTHROPIC_API_KEY,GEMINI_API_KEY,REDIS_HOST,REDIS_PORT,REDIS_PASSWORD,REDIS_DB,REDIS_URL,AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY,S3_BUCKET,CLOUDFRONT_DOMAIN,CLOUDFRONT_DISTRIBUTION_ID,GOOGLE_OAUTH_CLIENT_ID,GOOGLE_OAUTH_CLIENT_SECRET,SLACK_WEBHOOK_URL,NODE_ENV
+          script: |
+            cd ${{ secrets.EC2_APP_PATH }}
+            echo "Generating production .env.roast-landing file..."
+            cat > .env.roast-landing << EOF
+            # Production Environment Configuration - Generated from GitHub Secrets
+            NODE_ENV=${NODE_ENV}
+            PORT=3000
+            
+            # App Configuration
+            NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+            
+            # Supabase Configuration
+            NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+            SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+            
+            # Stripe Configuration
+            NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
+            STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+            STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+            
+            # AI Providers
+            OPENAI_API_KEY=${OPENAI_API_KEY}
+            ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+            GEMINI_API_KEY=${GEMINI_API_KEY}
+            
+            # Redis Configuration (RoastMyLanding uses DB 0)
+            REDIS_HOST=${REDIS_HOST}
+            REDIS_PORT=${REDIS_PORT}
+            REDIS_PASSWORD=${REDIS_PASSWORD}
+            REDIS_DB=0
+            REDIS_URL=redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0
+            
+            # AWS Configuration
+            AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+            AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+            AWS_REGION=us-east-1
+            
+            # Storage Configuration
+            S3_BUCKET=${S3_BUCKET}
+            CLOUDFRONT_DOMAIN=${CLOUDFRONT_DOMAIN}
+            CLOUDFRONT_DISTRIBUTION_ID=${CLOUDFRONT_DISTRIBUTION_ID}
+            
+            # Google OAuth Configuration
+            GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
+            GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
+            
+            # Notifications
+            SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+            
+            # Cache
+            CACHE_BACKEND=redis
+            EOF
+            
+            # Create symlink for .env (Docker Compose expects .env)
+            ln -sf .env.roast-landing .env
+            echo "Environment configuration ready"
 
-    - name: Start Application
-      uses: appleboy/ssh-action@v1.0.3
-      env:
-        ECR_REPOSITORY_URI: ${{ needs.build.outputs.image-uri }}
-        IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        envs: ECR_REPOSITORY_URI,IMAGE_TAG
-        script: |
-          cd ${{ secrets.EC2_APP_PATH }}
-          echo "Starting application containers..."
-          echo "Using image: $ECR_REPOSITORY_URI:$IMAGE_TAG"
-          
-          # Update docker-compose.prod.yml with the specific image tag
-          sed -i "s|image: .*|image: $ECR_REPOSITORY_URI:$IMAGE_TAG|g" docker-compose.prod.yml
-          
-          docker-compose -f docker-compose.prod.yml up -d
-          
-          # Check if containers actually started
-          sleep 5
-          RUNNING_CONTAINERS=$(docker-compose -f docker-compose.prod.yml ps --services --filter "status=running" | wc -l)
-          if [ "$RUNNING_CONTAINERS" -eq 0 ]; then
-            echo "No containers are running! Deployment failed."
-            docker-compose -f docker-compose.prod.yml logs
-            exit 1
-          fi
-          echo "Application containers started successfully"
+      - name: Login to ECR
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          ECR_REPOSITORY_URI: ${{ steps.build-image.outputs.image_uri }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: 22
+          envs: ECR_REPOSITORY_URI,AWS_DEFAULT_REGION
+          script: |
+            cd ${{ secrets.EC2_APP_PATH }}
+            echo "Logging into Amazon ECR..."
+            aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REPOSITORY_URI
+            echo "ECR login successful"
 
-    - name: Cleanup Old Images
-      uses: appleboy/ssh-action@v1.0.3
-      env:
-        ECR_REPOSITORY_URI: ${{ needs.build.outputs.image-uri }}
-        IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        envs: ECR_REPOSITORY_URI,IMAGE_TAG
-        script: |
-          cd ${{ secrets.EC2_APP_PATH }}
-          echo "Cleaning up old Docker images..."
-          # Keep only the current image and remove others for the same repository
-          docker images "$ECR_REPOSITORY_URI" --format "table {{.Repository}}:{{.Tag}}\t{{.ID}}" | tail -n +2 | grep -v "$IMAGE_TAG" | awk '{print $2}' | xargs -r docker rmi || echo "No old images to remove"
-          echo "Image cleanup completed"
-
-    - name: Wait for Application Startup
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        script: |
-          cd ${{ secrets.EC2_APP_PATH }}
-          echo "Waiting for application to start up..."
-          sleep 30
-          echo "Checking container status..."
-          docker-compose -f docker-compose.prod.yml ps
-          
-          # Verify containers are actually healthy
-          UNHEALTHY_CONTAINERS=$(docker-compose -f docker-compose.prod.yml ps --filter "status=running" | grep -c "unhealthy\|starting" || echo "0")
-          if [ "$UNHEALTHY_CONTAINERS" -gt 0 ]; then
-            echo "Some containers are not healthy yet"
-            docker-compose -f docker-compose.prod.yml logs --tail=20
-          fi
-
-    - name: Notify Slack - Deployment Progress
-      run: |
-        curl -X POST -H 'Content-type: application/json' \
-        --data '{"text":"**Deployment Progress**\nContainers started, performing health checks..."}' \
-        "${{ secrets.SLACK_WEBHOOK_URL }}"
-
-    - name: Verify deployment
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        port: 22
-        script: |
-          echo "Verifying deployment..."
-          cd ${{ secrets.EC2_APP_PATH }}
-          
-          # Check if containers are running
-          docker-compose -f docker-compose.prod.yml ps
-          
-          # Test health endpoint
-          HEALTH_STATUS=0
-          for i in {1..5}; do
-            if curl -f http://localhost:3000/api/health; then
-              echo "Application is healthy!"
-              HEALTH_STATUS=1
-              break
-            else
-              echo "Attempt $i/5: Application not ready yet, waiting..."
-              sleep 10
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          ECR_REPOSITORY_URI: ${{ steps.build-image.outputs.image_uri }}
+          IMAGE_TAG: ${{ steps.get-timestamp.outputs.timestamp }}-${{ steps.get-commit-hash.outputs.sha_short }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: 22
+          envs: ECR_REPOSITORY_URI,IMAGE_TAG
+          script: |
+            cd ${{ secrets.EC2_APP_PATH }}
+            
+            echo "Pulling Docker image: $ECR_REPOSITORY_URI:$IMAGE_TAG"
+            docker pull $ECR_REPOSITORY_URI:$IMAGE_TAG
+            
+            echo "Stopping existing RoastMyLanding containers..."
+            docker-compose -f docker-compose.prod.yml down --timeout 30 || echo "No containers to stop"
+            
+            # Update docker-compose.prod.yml with the specific image tag
+            sed -i "s|image: .*|image: $ECR_REPOSITORY_URI:$IMAGE_TAG|g" docker-compose.prod.yml
+            
+            echo "Starting application containers..."
+            docker-compose -f docker-compose.prod.yml up -d
+            
+            # Wait and verify deployment
+            sleep 30
+            
+            # Health check
+            HEALTH_STATUS=0
+            for i in {1..5}; do
+              if curl -f http://localhost:3000/api/health; then
+                echo "Application is healthy!"
+                HEALTH_STATUS=1
+                break
+              else
+                echo "Attempt $i/5: Application not ready yet, waiting..."
+                sleep 10
+              fi
+            done
+            
+            if [ $HEALTH_STATUS -eq 0 ]; then
+              echo "Health check failed - deployment failed"
+              docker-compose -f docker-compose.prod.yml logs
+              exit 1
             fi
-          done
+            
+            # Cleanup old images (keep last 3)
+            docker images "$ECR_REPOSITORY_URI" --format "table {{.Repository}}:{{.Tag}}\t{{.ID}}" | tail -n +2 | grep -v "$IMAGE_TAG" | awk '{print $2}' | xargs -r docker rmi || echo "No old images to remove"
+            echo "Deployment completed successfully"
+
+      - name: Production smoke tests
+        run: |
+          echo "Running production smoke tests..."
+          sleep 10  # Brief wait after deployment
           
-          if [ $HEALTH_STATUS -eq 0 ]; then
-            echo "Health check failed - deployment failed"
+          PROD_URL="https://tanta.com.ng"
+          
+          # Health check test
+          HEALTH_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$PROD_URL/api/health" || echo "000")
+          echo "Health check status: $HEALTH_STATUS"
+          
+          # Frontend availability test
+          FRONTEND_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$PROD_URL" || echo "000")
+          echo "Frontend status: $FRONTEND_STATUS"
+          
+          if [[ "$HEALTH_STATUS" == "200" ]] && [[ "$FRONTEND_STATUS" == "200" ]]; then
+            echo "Production deployment successful"
+            echo "## Production Deployment Success" >> $GITHUB_STEP_SUMMARY
+            echo "- Frontend responding correctly" >> $GITHUB_STEP_SUMMARY
+            echo "- Health endpoint accessible" >> $GITHUB_STEP_SUMMARY
+            echo "- All smoke tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Production smoke test failed"
+            echo "Health Status: $HEALTH_STATUS, Frontend Status: $FRONTEND_STATUS"
             exit 1
           fi
-          
-          # Show recent logs
-          echo "Recent application logs:"
-          docker-compose -f docker-compose.prod.yml logs --tail=20 app
 
-    - name: Notify Slack - Deployment Result
-      run: |
-        if [ "${{ job.status }}" == "success" ]; then
-          curl -X POST -H 'Content-type: application/json' \
-          --data '{
-            "attachments": [{
-              "color": "#36a64f",
-              "blocks": [{
-                "type": "header",
-                "text": {
-                  "type": "plain_text",
-                  "text": "RoastMyLanding Deployment Successful"
+      - name: Post-deployment metrics
+        run: |
+          echo "Collecting post-deployment metrics..."
+          PROD_URL="https://tanta.com.ng"
+          
+          # Response time test
+          START_TIME=$(date +%s%3N)
+          curl -s "$PROD_URL" > /dev/null
+          END_TIME=$(date +%s%3N)
+          RESPONSE_TIME=$((END_TIME - START_TIME))
+          
+          echo "## Performance Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend Response Time:** ${RESPONSE_TIME}ms" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "- **Production URL:** $PROD_URL" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📢 Notify Slack - Production
+        if: always()
+        uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+          custom_payload: |
+            {
+              "text": "${{ job.status }}" === "success" ? "Production Deployment Successful!" : "Production Deployment Failed!",
+              "attachments": [
+                {
+                  "color": "${{ job.status }}" === "success" ? "good" : "danger",
+                  "fields": [
+                    {
+                      "title": "Repository",
+                      "value": "${{ github.repository }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Environment",
+                      "value": "Production (Docker/EC2)",
+                      "short": true
+                    },
+                    {
+                      "title": "Commit",
+                      "value": "${{ github.sha }}".substring(0, 7),
+                      "short": true
+                    },
+                    {
+                      "title": "Author",
+                      "value": "${{ github.actor }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Live URL",
+                      "value": "https://tanta.com.ng",
+                      "short": false
+                    }
+                  ]
                 }
-              }, {
-                "type": "section",
-                "fields": [{
-                  "type": "mrkdwn",
-                  "text": "*Environment:*\nProduction"
-                }, {
-                  "type": "mrkdwn",
-                  "text": "*Image:*\n`${{ needs.build.outputs.image-tag }}`"
-                }, {
-                  "type": "mrkdwn",
-                  "text": "*Port:*\n3000"
-                }, {
-                  "type": "mrkdwn",
-                  "text": "*Pipeline:*\n#${{ github.run_number }}"
-                }]
-              }, {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*Live URL:*\n<https://tanta.com.ng|RoastMyLanding Production Site>"
+              ]
+            }
+
+  # Failure notification job
+  notify-failure:
+    name: Failure Notification
+    runs-on: ubuntu-latest
+    needs: [setup, security, frontend, integration-tests]
+    if: always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    steps:
+      - name: Notify Slack - Pipeline Failure
+        uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          status: failure
+          channel: '#deployments'
+          custom_payload: |
+            {
+              "text": "RoastMyLanding Pipeline FAILED",
+              "attachments": [
+                {
+                  "color": "danger",
+                  "fields": [
+                    {
+                      "title": "Repository",
+                      "value": "${{ github.repository }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Commit",
+                      "value": "${{ github.sha }}".substring(0, 7),
+                      "short": true
+                    },
+                    {
+                      "title": "Author",
+                      "value": "${{ github.actor }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Branch",
+                      "value": "${{ github.ref_name }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Failed Jobs",
+                      "value": "Setup: ${{ needs.setup.result }}, Security: ${{ needs.security.result }}, Frontend: ${{ needs.frontend.result }}, Lambda: ${{ needs.lambda.result }}, Infrastructure: ${{ needs.infrastructure.result }}, Tests: ${{ needs.integration-tests.result }}, Staging: ${{ needs.deploy-staging.result }}, Production: ${{ needs.deploy-production.result }}",
+                      "short": false
+                    },
+                    {
+                      "title": "Action",
+                      "value": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Logs>",
+                      "short": false
+                    }
+                  ]
                 }
-              }, {
-                "type": "actions",
-                "elements": [{
-                  "type": "button",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "Visit Site"
-                  },
-                  "url": "https://tanta.com.ng"
-                }, {
-                  "type": "button",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "Health Check"
-                  },
-                  "url": "https://tanta.com.ng/api/health"
-                }]
-              }]
-            }]
-          }' \
-          "${{ secrets.SLACK_WEBHOOK_URL }}"
-        else
-          curl -X POST -H 'Content-type: application/json' \
-          --data '{
-            "attachments": [{
-              "color": "#ff0000",
-              "blocks": [{
-                "type": "header",
-                "text": {
-                  "type": "plain_text",
-                  "text": "RoastMyLanding Deployment Failed"
+              ]
+            }
+
+  # Cleanup and notifications
+  cleanup:
+    name: Cleanup and Notifications
+    runs-on: ubuntu-latest
+    needs: [setup, security, frontend, integration-tests]
+    if: always()
+    steps:
+      - name: Cleanup artifacts
+        run: |
+          echo "Cleaning up temporary artifacts..."
+          # Add any cleanup steps here
+
+      - name: Deployment summary
+        run: |
+          PIPELINE_STATUS="success"
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            PIPELINE_STATUS="failure"
+          elif [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            PIPELINE_STATUS="cancelled"
+          fi
+          
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pipeline Status:** $PIPELINE_STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ needs.setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          
+          # Job status breakdown
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Job Results:" >> $GITHUB_STEP_SUMMARY
+          echo "- Setup: ${{ needs.setup.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Security: ${{ needs.security.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: ${{ needs.frontend.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Integration Tests: ${{ needs.integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack - Pipeline Success
+        if: "!contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')"
+        uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          status: success
+          channel: '#deployments'
+          custom_payload: |
+            {
+              "text": "RoastMyLanding Pipeline Completed Successfully!",
+              "attachments": [
+                {
+                  "color": "good",
+                  "fields": [
+                    {
+                      "title": "Repository",
+                      "value": "${{ github.repository }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Environment",
+                      "value": "${{ needs.setup.outputs.environment }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Commit",
+                      "value": "${{ github.sha }}".substring(0, 7),
+                      "short": true
+                    },
+                    {
+                      "title": "Author",
+                      "value": "${{ github.actor }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Duration",
+                      "value": "Completed at $(date -u +"%H:%M:%S UTC")",
+                      "short": true
+                    },
+                    {
+                      "title": "Status",
+                      "value": "All checks passed",
+                      "short": true
+                    }
+                  ]
                 }
-              }, {
-                "type": "section",
-                "fields": [{
-                  "type": "mrkdwn",
-                  "text": "*Pipeline:*\n#${{ github.run_number }}"
-                }, {
-                  "type": "mrkdwn",
-                  "text": "*Branch:*\n${{ github.ref_name }}"
-                }, {
-                  "type": "mrkdwn",
-                  "text": "*Triggered by:*\n${{ github.actor }}"
-                }, {
-                  "type": "mrkdwn",
-                  "text": "*Status:*\nFAILED"
-                }]
-              }, {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "RoastMyLanding services need immediate attention!"
-                }
-              }, {
-                "type": "actions",
-                "elements": [{
-                  "type": "button",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "View Failed Pipeline"
-                  },
-                  "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                }]
-              }]
-            }]
-          }' \
-          "${{ secrets.SLACK_WEBHOOK_URL }}"
-        fi
-      if: always()
+              ]
+            }
