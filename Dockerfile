@@ -4,10 +4,14 @@
 FROM node:18-alpine AS deps
 WORKDIR /app
 
+# Enable corepack for pnpm
+RUN corepack enable
+
 # Install dependencies based on the package manager
-COPY package*.json ./
+COPY package*.json pnpm-lock.yaml ./
 RUN \
-  if [ -f package-lock.json ]; then npm ci --only=production --ignore-scripts; \
+  if [ -f pnpm-lock.yaml ]; then pnpm install --prod --frozen-lockfile; \
+  elif [ -f package-lock.json ]; then npm ci --only=production --ignore-scripts; \
   elif [ -f yarn.lock ]; then yarn install --frozen-lockfile; \
   else echo "Lockfile not found." && exit 1; \
   fi
@@ -15,6 +19,9 @@ RUN \
 # Stage 2: Builder
 FROM node:18-alpine AS builder
 WORKDIR /app
+
+# Enable corepack for pnpm
+RUN corepack enable
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
@@ -24,11 +31,14 @@ COPY . .
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
 
-RUN npm run build
+RUN pnpm run build
 
 # Stage 3: Runner
 FROM node:18-alpine AS runner
 WORKDIR /app
+
+# Install curl for health checks
+RUN apk add --no-cache curl
 
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
