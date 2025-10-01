@@ -1,0 +1,83 @@
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js
+.next
+out
+
+# Production build
+build
+
+# Environment files
+.env*
+!.env.example
+
+# Testing
+coverage
+.nyc_output
+
+# Misc
+.DS_Store
+*.tgz
+*.tar.gz
+
+# Debug
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Optional npm cache directory
+.npm
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# IDEs and editors
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Documentation and non-essential files
+README.md
+CHANGELOG.md
+LICENSE
+*.md
+docs/
+.github/
+.git/
+.gitignore
+
+# Amplify
+amplify/
+.amplifyrc
+
+# Docker files
+Dockerfile*
+docker-compose*.yml
+
+# Deployment scripts
+deploy/
+*.pem
