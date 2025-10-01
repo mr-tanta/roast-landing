@@ -23,6 +23,15 @@ COPY . .
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Add minimal environment variables for build process
+ENV STRIPE_SECRET_KEY=sk_test_placeholder_for_build
+ENV OPENAI_API_KEY=sk-placeholder-for-build
+ENV ANTHROPIC_API_KEY=sk-ant-placeholder-for-build
+ENV GEMINI_API_KEY=placeholder-for-build
+ENV NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder-anon-key
+ENV SUPABASE_SERVICE_ROLE_KEY=placeholder-service-role-key
+
 RUN pnpm run build
 
 # Stage 2: Production dependencies only
