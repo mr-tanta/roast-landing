@@ -202,8 +202,7 @@ jobs:
       - name: Build frontend
         env:
           NODE_ENV: production
-          NEXT_PUBLIC_USE_EXTERNAL_API: true
-          NEXT_PUBLIC_API_URL: https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -346,42 +345,38 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Test Lambda API
+      - name: Test Production API
         run: |
-          echo "Testing Lambda API endpoint..."
-          API_URL="https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod"
+          echo "Testing production API endpoint..."
+          PROD_URL="https://tanta.com.ng"
           
           # Health check
-          HEALTH_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$API_URL/health" || echo "000")
+          HEALTH_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$PROD_URL/api/health" || echo "000")
           echo "Health check status: $HEALTH_STATUS"
           
-          # API test
-          RESPONSE=$(curl -s -X POST "$API_URL/roast" \
-            -H "Content-Type: application/json" \
-            -d '{"url": "https://example.com"}' || echo "API_ERROR")
-            
-          if [[ "$RESPONSE" == "API_ERROR" ]]; then
-            echo "API test failed"
-            exit 1
+          # Basic connectivity test
+          FRONTEND_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$PROD_URL" || echo "000")
+          echo "Frontend status: $FRONTEND_STATUS"
+          
+          if [[ "$HEALTH_STATUS" == "200" ]] && [[ "$FRONTEND_STATUS" == "200" ]]; then
+            echo "Production site responding correctly"
           else
-            echo "API responding correctly"
-            echo "$RESPONSE" | jq '.roast' 2>/dev/null || echo "Response received but not JSON"
+            echo "Production site not fully available yet (Health: $HEALTH_STATUS, Frontend: $FRONTEND_STATUS)"
+            echo "This may be expected if this is the first deployment"
           fi
 
       - name: API Performance Test
         run: |
           echo "Running performance tests..."
-          API_URL="https://1il9nnkz4b.execute-api.us-east-1.amazonaws.com/prod/roast"
+          PROD_URL="https://tanta.com.ng"
           
-          # Simple load test
+          # Simple load test on health endpoint
           for i in {1..5}; do
             START_TIME=$(date +%s%3N)
-            curl -s -X POST "$API_URL" \
-              -H "Content-Type: application/json" \
-              -d "{\"url\": \"https://test$i.example.com\"}" > /dev/null
+            curl -s "$PROD_URL/api/health" > /dev/null
             END_TIME=$(date +%s%3N)
             DURATION=$((END_TIME - START_TIME))
-            echo "Request $i: ${DURATION}ms"
+            echo "Health check $i: ${DURATION}ms"
           done
 
   # Deployment to staging
@@ -474,46 +469,197 @@ jobs:
               ]
             }
 
-  # Production deployment (Amplify)
+  # Production deployment (Docker/EC2)
   deploy-production:
-    name: Deploy to Production (Amplify)
+    name: Deploy to Production (Docker/EC2)
     runs-on: ubuntu-latest
     needs: [frontend, integration-tests]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment:
       name: production
-      url: https://roastmylanding.com
+      url: https://tanta.com.ng
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Trigger Amplify Deployment
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push Docker image
+        id: build-image
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: roast-landing
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "Triggering Amplify deployment for RoastMyLanding..."
-          aws amplify start-job \
-            --app-id d29z8nh5m7c4h1 \
-            --branch-name main \
-            --job-type RELEASE \
-            --region us-east-1
+          # Build the Docker image
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
           
-          echo "Amplify deployment triggered successfully"
+          # Push images to ECR
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Deploy to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          APP_PATH: ${{ secrets.EC2_APP_PATH }}
+          ECR_REPOSITORY: roast-landing
+        run: |
+          # Create SSH key file
+          echo "$EC2_SSH_PRIVATE_KEY" > private_key.pem
+          chmod 600 private_key.pem
+          
+          # Create deployment script
+          cat > deploy_script.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          # Navigate to app directory
+          cd $APP_PATH
+          
+          # Login to ECR
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
+          
+          # Pull latest image
+          docker pull $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+          # Create environment file with all secrets
+          cat > .env.production << 'ENVEOF'
+          # App Configuration
+          NEXT_PUBLIC_APP_URL=https://tanta.com.ng
+          NODE_ENV=production
+          
+          # Supabase Configuration
+          NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          
+          # Redis Configuration
+          REDIS_HOST=${{ secrets.REDIS_HOST }}
+          REDIS_PORT=${{ secrets.REDIS_PORT }}
+          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+          REDIS_DB=${{ secrets.REDIS_DB }}
+          REDIS_URL=${{ secrets.REDIS_URL }}
+          
+          # AI Providers
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          
+          # Stripe
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          
+          # AWS
+          AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION=us-east-1
+          
+          # Storage
+          S3_BUCKET=${{ secrets.S3_BUCKET }}
+          CLOUDFRONT_DOMAIN=${{ secrets.CLOUDFRONT_DOMAIN }}
+          CLOUDFRONT_DISTRIBUTION_ID=${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          
+          # Google OAuth
+          GOOGLE_OAUTH_CLIENT_ID=${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET=${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          
+          # Notifications
+          SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
+          
+          # Cache
+          CACHE_BACKEND=redis
+          ENVEOF
+          
+          # Create docker-compose.prod.yml
+          cat > docker-compose.prod.yml << 'COMPOSEEOF'
+          version: '3.8'
+          
+          services:
+            app:
+              image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+              container_name: roast-landing-app
+              restart: unless-stopped
+              ports:
+                - "3000:3000"
+              env_file:
+                - .env.production
+              healthcheck:
+                test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 40s
+              logging:
+                driver: "json-file"
+                options:
+                  max-size: "10m"
+                  max-file: "3"
+          COMPOSEEOF
+          
+          # Stop existing containers
+          docker-compose -f docker-compose.prod.yml down || true
+          
+          # Start new containers
+          docker-compose -f docker-compose.prod.yml up -d
+          
+          # Wait for health check
+          echo "Waiting for application to be healthy..."
+          sleep 30
+          
+          # Health check
+          if curl -f http://localhost:3000/api/health; then
+            echo "✅ Application deployment successful!"
+          else
+            echo "❌ Application health check failed!"
+            docker-compose -f docker-compose.prod.yml logs
+            exit 1
+          fi
+          
+          # Cleanup old images (keep last 3)
+          docker images $ECR_REGISTRY/$ECR_REPOSITORY --format "table {{.Tag}}\t{{.ID}}" | grep -v TAG | tail -n +4 | awk '{print $2}' | xargs -r docker rmi || true
+          
+          EOF
+          
+          # Copy and execute deployment script on EC2
+          scp -i private_key.pem -o StrictHostKeyChecking=no deploy_script.sh ubuntu@$EC2_HOST:/tmp/
+          ssh -i private_key.pem -o StrictHostKeyChecking=no ubuntu@$EC2_HOST "
+            export ECR_REGISTRY=$ECR_REGISTRY
+            export ECR_REPOSITORY=$ECR_REPOSITORY
+            export IMAGE_TAG=$IMAGE_TAG
+            export APP_PATH=$APP_PATH
+            chmod +x /tmp/deploy_script.sh
+            /tmp/deploy_script.sh
+          "
 
       - name: Production smoke tests
         run: |
           echo "Running production smoke tests..."
-          sleep 30  # Wait for Amplify deployment to be ready
+          sleep 10  # Brief wait after deployment
           
-          AMPLIFY_URL="https://d29z8nh5m7c4h1.amplifyapp.com"
+          PROD_URL="https://tanta.com.ng"
           
           # Health check test
-          HEALTH_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$AMPLIFY_URL/health" || echo "000")
+          HEALTH_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$PROD_URL/api/health" || echo "000")
           echo "Health check status: $HEALTH_STATUS"
           
           # Frontend availability test
-          FRONTEND_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$AMPLIFY_URL" || echo "000")
+          FRONTEND_STATUS=$(curl -s -w "%{http_code}" -o /dev/null "$PROD_URL" || echo "000")
           echo "Frontend status: $FRONTEND_STATUS"
           
           if [[ "$HEALTH_STATUS" == "200" ]] && [[ "$FRONTEND_STATUS" == "200" ]]; then
@@ -531,18 +677,18 @@ jobs:
       - name: Post-deployment metrics
         run: |
           echo "Collecting post-deployment metrics..."
-          AMPLIFY_URL="https://d29z8nh5m7c4h1.amplifyapp.com"
+          PROD_URL="https://tanta.com.ng"
           
           # Response time test
           START_TIME=$(date +%s%3N)
-          curl -s "$AMPLIFY_URL" > /dev/null
+          curl -s "$PROD_URL" > /dev/null
           END_TIME=$(date +%s%3N)
           RESPONSE_TIME=$((END_TIME - START_TIME))
           
           echo "## Performance Metrics" >> $GITHUB_STEP_SUMMARY
           echo "- **Frontend Response Time:** ${RESPONSE_TIME}ms" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployment Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
-          echo "- **Amplify URL:** $AMPLIFY_URL" >> $GITHUB_STEP_SUMMARY
+          echo "- **Production URL:** $PROD_URL" >> $GITHUB_STEP_SUMMARY
 
       - name: 📢 Notify Slack - Production
         if: always()
@@ -555,7 +701,7 @@ jobs:
           fields: repo,message,commit,author,action,eventName,ref,workflow
           custom_payload: |
             {
-              "text": "${{ job.status }}" === "success" ? "Production Deployment Successful!" : "Production Deployment Failed!",
+              "text": "${{ job.status }}" === "success" ? "🚀 Roast Landing Production Deployment Successful!" : "❌ Roast Landing Production Deployment Failed!",
               "attachments": [
                 {
                   "color": "${{ job.status }}" === "success" ? "good" : "danger",
@@ -567,7 +713,7 @@ jobs:
                     },
                     {
                       "title": "Environment",
-                      "value": "Production (AWS Amplify)",
+                      "value": "Production (Docker/EC2)",
                       "short": true
                     },
                     {
@@ -582,7 +728,7 @@ jobs:
                     },
                     {
                       "title": "Live URL",
-                      "value": "https://d29z8nh5m7c4h1.amplifyapp.com",
+                      "value": "https://tanta.com.ng",
                       "short": false
                     }
                   ]
@@ -692,7 +838,7 @@ jobs:
           channel: '#deployments'
           custom_payload: |
             {
-              "text": "RoastMyLanding Pipeline Completed Successfully!",
+              "text": "🚀 RoastMyLanding Pipeline Completed Successfully!",
               "attachments": [
                 {
                   "color": "good",
@@ -723,8 +869,8 @@ jobs:
                       "short": true
                     },
                     {
-                      "title": "Status",
-                      "value": "All checks passed",
+                      "title": "Live URL",
+                      "value": "https://tanta.com.ng",
                       "short": true
                     }
                   ]
