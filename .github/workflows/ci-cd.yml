@@ -624,9 +624,9 @@ jobs:
           
           # Health check
           if curl -f http://localhost:3000/api/health; then
-            echo "✅ Application deployment successful!"
+            echo "Application deployment successful!"
           else
-            echo "❌ Application health check failed!"
+            echo "Application health check failed!"
             docker-compose -f docker-compose.prod.yml logs
             exit 1
           fi
@@ -690,7 +690,7 @@ jobs:
           echo "- **Deployment Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
           echo "- **Production URL:** $PROD_URL" >> $GITHUB_STEP_SUMMARY
 
-      - name: 📢 Notify Slack - Production
+      - name: Notify Slack - Production
         if: always()
         uses: 8398a7/action-slack@v3
         env:
@@ -701,7 +701,7 @@ jobs:
           fields: repo,message,commit,author,action,eventName,ref,workflow
           custom_payload: |
             {
-              "text": "${{ job.status }}" === "success" ? "🚀 Roast Landing Production Deployment Successful!" : "❌ Roast Landing Production Deployment Failed!",
+              "text": "${{ job.status }}" === "success" ? "Roast Landing Production Deployment Successful!" : "Roast Landing Production Deployment Failed!",
               "attachments": [
                 {
                   "color": "${{ job.status }}" === "success" ? "good" : "danger",
@@ -838,7 +838,7 @@ jobs:
           channel: '#deployments'
           custom_payload: |
             {
-              "text": "🚀 RoastMyLanding Pipeline Completed Successfully!",
+              "text": "RoastMyLanding Pipeline Completed Successfully!",
               "attachments": [
                 {
                   "color": "good",
