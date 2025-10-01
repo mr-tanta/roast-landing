@@ -23,8 +23,19 @@ COPY . .
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Add minimal server-side environment variables for build process
-# Note: NEXT_PUBLIC_* variables are excluded to allow runtime configuration
+# Build-time environment variables
+# NEXT_PUBLIC_* variables must be set at build time for client-side code
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=$NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+
+# Server-side build-time placeholders
 ENV STRIPE_SECRET_KEY=sk_test_placeholder_for_build
 ENV OPENAI_API_KEY=sk-placeholder-for-build
 ENV ANTHROPIC_API_KEY=sk-ant-placeholder-for-build

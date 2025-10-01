@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  app:
+    image: placeholder-will-be-replaced-by-pipeline
+    container_name: roast-landing-app
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env.roast-landing
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - ./logs:/var/log/roast-landing
+
+networks:
+  default:
+    name: roast-landing-prod-network
